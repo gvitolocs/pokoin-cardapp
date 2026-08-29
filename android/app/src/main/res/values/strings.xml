@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Pokoin Scan</string>
+    <string name="status_idle">Point at a card</string>
+    <string name="status_no_card">No card · index %d</string>
+    <string name="status_match">%1$s · L2 %2$.3f · index %3$d</string>
+    <string name="status_unknown">No match · L2 %1$.3f · index %2$d</string>
+    <string name="index_count">Index: %d cards</string>
+    <string name="add_photo">Add photo</string>
+    <string name="save_warp">Save warp</string>
+    <string name="clear_index">Clear</string>
+    <string name="mode_fast">Fast</string>
+    <string name="mode_multi">Multi + ViT</string>
+    <string name="mode_hint_fast">Fast: YOLO detect + Milo 128-d → TCGplayer</string>
+    <string name="mode_hint_multi">Multi: YOLO boxes + Milo; CLIP encoder not in APK</string>
+</resources>

@@ -1,0 +1,27 @@
+clones/
+results/
+images/*
+!images/.gitkeep
+!images/README.md
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+._*
+*.apk
+*.so
+*.bigar
+*.bigar.gz
+notes/clone-*.log
+models/
+out/
+
+# Android local SDK + generated identify assets
+android/local.properties
+android/.gradle/
+android/.kotlin/
+android/**/build/
+android/app/src/main/jniLibs/
+android/app/src/main/assets/models/
+android/app/src/main/assets/milo_index/embeddings.bin
+android/app/src/main/assets/bigar_index/
