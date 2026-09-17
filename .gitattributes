@@ -1,0 +1,6 @@
+
+# Codevira — deterministic id-collision merge for the decision log
+.codevira/decisions.jsonl merge=codevira-jsonl
+
+# Codevira — deterministic merges for generated memory
+AGENTS.md merge=codevira-agents
