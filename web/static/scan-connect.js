@@ -605,15 +605,26 @@
       } catch (_) {
         // ignore
       }
+      const summary = result.summary || {};
+      try {
+        console.info('[scan-connect] queue-for-dashboard', JSON.stringify({
+          sequence,
+          confident: confident(summary),
+          score: summary.score || 0,
+          margin: summary.margin || 0,
+          name: summary.top ? summary.top.name : null,
+          publicId: summary.top ? summary.top.public_id : null,
+          boxes: Array.isArray(result.data && result.data.boxes) ? result.data.boxes.length : 0,
+        }));
+      } catch (_) {
+        // ignore
+      }
       const image = !confident(result.summary) && result.context && result.context.blob
         ? await thumbnail(result.context.blob, result.data)
         : '';
       outbox.add(buildEvent(result, { sequence, clockOffsetMs: clock.offset, image }));
     }
 
-    shutter.addEventListener('click', () => {
-      if (lastPreview) send(gate.force(lastPreview.data, lastPreview.context));
-    });
     leaveBtn.addEventListener('click', async () => {
       try {
         await request('/api/scan-phone?action=leave', {}, state.token);
@@ -633,7 +644,30 @@
         const result = gate.push(data, context);
         if (result) send(result);
       },
+      /**
+       * Optional: index.html sets this so Add card runs a fresh identify
+       * instead of only reusing the last live preview.
+       * @type {null | (() => Promise<{data: object, context: object} | null>)}
+       */
+      captureNow: null,
     };
+
+    shutter.addEventListener('click', () => {
+      const run = async () => {
+        shutter.disabled = true;
+        try {
+          let preview = lastPreview;
+          if (typeof api.captureNow === 'function') {
+            const fresh = await api.captureNow();
+            if (fresh && fresh.data) preview = fresh;
+          }
+          if (preview) send(gate.force(preview.data, preview.context));
+        } finally {
+          shutter.disabled = false;
+        }
+      };
+      run();
+    });
 
     function clearPairFromUrl() {
       try {

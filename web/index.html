@@ -1,0 +1,970 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#050816">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Pokoin Scan">
+  <meta name="description" content="Scan Pokémon, One Piece and Riftbound cards in your browser.">
+  <link rel="canonical" href="https://scan.pokoin.com/">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Pokoin">
+  <meta property="og:title" content="Pokoin Scan">
+  <meta property="og:description" content="Scan Pokémon, One Piece and Riftbound cards from your phone.">
+  <meta property="og:url" content="https://scan.pokoin.com/">
+  <meta property="og:image" content="https://pokoin.com/pokoin-project-banner-1360x430.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="icon" href="/static/pokoin-icon.png">
+  <link rel="apple-touch-icon" href="/static/pokoin-icon.png">
+  <title>Pokoin Scan</title>
+  <style>
+    :root {
+      --bg: #050816;
+      --text: #f8fafc;
+      --muted: #94a3b8;
+      --yellow: #facc15;
+      --panel: rgba(11, 11, 11, 0.8);
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: ui-sans-serif, system-ui, -apple-system, "SF Pro Text", Segoe UI, sans-serif;
+      overflow: hidden;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+    }
+    .stage {
+      position: fixed;
+      inset: 0;
+      height: 100%;
+      height: 100dvh;
+      overflow: hidden;
+      background: #000;
+    }
+    video, img.preview {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      background: #000;
+    }
+    #live { object-fit: contain; }
+    #overlay {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+    }
+    .boot {
+      pointer-events: none;
+      position: absolute;
+      inset: 0;
+      z-index: 20;
+      background: var(--bg);
+      display: grid;
+      place-items: center;
+      transition: opacity 0.35s ease;
+    }
+    .boot.hide {
+      opacity: 0;
+      pointer-events: none;
+    }
+    .boot img {
+      width: 128px;
+      height: 128px;
+      animation: bootIn 0.5s ease-out forwards;
+    }
+    @keyframes bootIn {
+      from { opacity: 0; transform: scale(0.82); }
+      to { opacity: 1; transform: scale(1); }
+    }
+    .game-rail {
+      position: absolute;
+      top: calc(12px + env(safe-area-inset-top));
+      left: 10px;
+      z-index: 5;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 6px;
+    }
+    .letter, .lang {
+      width: 40px;
+      height: 40px;
+      border-radius: 12px;
+      border: 1px solid rgba(250, 204, 21, 0.45);
+      background: rgba(5, 8, 22, 0.82);
+      color: var(--text);
+      font-weight: 800;
+      font-size: 15px;
+      cursor: pointer;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+    }
+    .letter.on, .lang.on {
+      background: var(--yellow);
+      color: #111;
+      border-color: var(--yellow);
+    }
+    .letter:disabled, .lang:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+    .lang {
+      width: 40px;
+      height: 28px;
+      font-size: 11px;
+      font-weight: 700;
+      border-radius: 8px;
+    }
+    .game-gap {
+      height: 4px;
+    }
+    .warming {
+      position: absolute;
+      top: calc(12px + env(safe-area-inset-top));
+      left: 0;
+      right: 0;
+      text-align: center;
+      z-index: 3;
+      color: var(--yellow);
+      font-weight: 600;
+      font-size: 14px;
+      pointer-events: none;
+    }
+    .warming[hidden] { display: none; }
+    .dock {
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      z-index: 5;
+      padding: 0 8px calc(12px + env(safe-area-inset-bottom));
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      background: linear-gradient(to top, rgba(5, 8, 22, 0.88), rgba(5, 8, 22, 0));
+      padding-top: 28px;
+    }
+    .multi-list {
+      margin: 0 8px;
+      max-height: 280px;
+      overflow: auto;
+      border-radius: 12px;
+      background: var(--panel);
+      display: none;
+    }
+    .multi-list.open { display: block; }
+    .multi-row {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      padding: 8px 12px;
+      border-bottom: 1px solid rgba(250, 204, 21, 0.2);
+      font-size: 13px;
+    }
+    .multi-row:last-child { border-bottom: 0; }
+    .multi-row .pct {
+      color: var(--yellow);
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      min-width: 2.6em;
+    }
+    .multi-row .title {
+      flex: 1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .controls {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 8px;
+    }
+    .seg {
+      display: inline-flex;
+      border-radius: 12px;
+      overflow: hidden;
+      background: var(--panel);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      flex: 1;
+      min-width: 0;
+    }
+    .seg button {
+      flex: 1;
+      border: 0;
+      background: transparent;
+      color: var(--muted);
+      padding: 10px 12px;
+      font-weight: 650;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    .seg button.on {
+      background: rgba(250, 204, 21, 0.22);
+      color: var(--yellow);
+    }
+    .icon {
+      width: 44px;
+      height: 44px;
+      border-radius: 12px;
+      border: 0;
+      background: var(--panel);
+      color: var(--text);
+      display: grid;
+      place-items: center;
+      cursor: pointer;
+      flex: 0 0 auto;
+      font-size: 18px;
+    }
+    .icon.on {
+      color: var(--yellow);
+    }
+    #file { display: none; }
+    .camera-controls { display: flex; justify-content: flex-end; align-items: center; gap: 8px; pointer-events: auto; padding: 0 8px; }
+    .camera-controls label { font-size: 13px; color: var(--text); }
+    .camera-controls select { height: 44px; width: min(250px, 65vw); min-width: 0; border: 1px solid #64748b; border-radius: 10px; background: #0b0b0b; color: #f8fafc; padding: 0 10px; font-size: 16px; }
+    [hidden] { display: none !important; }
+    button, .icon { touch-action: manipulation; }
+    button:focus-visible, a:focus-visible { outline: 3px solid white; outline-offset: 3px; }
+    .game-rail { left: calc(10px + env(safe-area-inset-left)); max-height: calc(100% - 170px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); overflow-y: auto; padding: 3px; }
+    .game-group, .language-group { display: flex; flex-direction: column; gap: 6px; }
+    .language-group { margin-top: 10px; }
+    .letter, .lang { width: 44px; height: 44px; flex-shrink: 0; }
+    .catalog-status { position: absolute; top: calc(16px + env(safe-area-inset-top)); left: calc(72px + env(safe-area-inset-left)); right: calc(12px + env(safe-area-inset-right)); z-index: 4; font-size: 13px; pointer-events: none; }
+    .catalog-status span { display: inline-block; max-width: 100%; padding: 6px 10px; border-radius: 10px; background: var(--panel); }
+    .warming { top: calc(60px + env(safe-area-inset-top)); left: calc(74px + env(safe-area-inset-left)); right: calc(12px + env(safe-area-inset-right)); text-align: left; }
+    .dock { padding-left: calc(8px + env(safe-area-inset-left)); padding-right: calc(8px + env(safe-area-inset-right)); pointer-events: none; }
+    .controls, .multi-list { pointer-events: auto; }
+    .multi-list { margin-left: 64px; max-height: min(36dvh, 240px); }
+    a.multi-row { color: var(--text); text-decoration: none; min-height: 44px; }
+    .seg button { min-height: 44px; padding: 10px 8px; }
+    @media (max-height: 500px) and (orientation: landscape) {
+      .game-rail { flex-direction: row; max-width: calc(100% - 24px - env(safe-area-inset-left) - env(safe-area-inset-right)); max-height: 56px; overflow-x: auto; overflow-y: hidden; }
+      .game-group, .language-group { flex-direction: row; }
+      .language-group { margin-top: 0; margin-left: 12px; }
+      .catalog-status { top: calc(76px + env(safe-area-inset-top)); left: calc(14px + env(safe-area-inset-left)); }
+      .warming { top: calc(116px + env(safe-area-inset-top)); left: calc(16px + env(safe-area-inset-left)); }
+      .multi-list { align-self: flex-end; width: min(48%, 440px); max-height: 26dvh; margin-right: 8px; }
+    }
+    /* Scan Connect (/connect): pair with the Pokoin dashboard, then act as a camera. */
+    .sc-open-browser {
+      max-width: 320px; width: 100%; margin: 8px 0 0; padding: 0;
+      text-align: center;
+    }
+    .sc-open-browser-btn {
+      display: flex; align-items: center; justify-content: center; width: 100%;
+      padding: 12px 14px; border-radius: 10px; background: #f5c542; color: #1a1608;
+      font-weight: 700; text-decoration: none; font-size: 14px; box-sizing: border-box;
+    }
+    .sc-open-browser-note {
+      margin: 8px 0 0; color: var(--muted); font-size: 12px; line-height: 1.35;
+    }
+    .sc-panel { position: fixed; inset: 0; z-index: 40; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: calc(20px + env(safe-area-inset-top)) 20px calc(20px + env(safe-area-inset-bottom)); background: var(--bg); text-align: center; }
+    .sc-panel h1 { margin: 4px 0 0; font-size: 22px; }
+    .sc-logo { width: 56px; height: 56px; }
+    .sc-hint { margin: 0; color: var(--muted); font-size: 14px; max-width: 320px; }
+    .sc-slots { display: flex; gap: 10px; margin: 14px 0 4px; }
+    .sc-slot { width: 56px; height: 68px; display: grid; place-items: center; border-radius: 12px; border: 1px solid #334155; background: #0b1020; color: var(--muted); font-size: 34px; font-weight: 800; font-variant-numeric: tabular-nums; }
+    .sc-slot.filled { color: var(--yellow); border-color: var(--yellow); }
+    .sc-panel.ok .sc-slot { border-color: #3ecf8e; color: #3ecf8e; }
+    .sc-status { min-height: 20px; margin: 0; color: var(--yellow); font-weight: 650; font-size: 15px; }
+    .sc-keys { display: grid; grid-template-columns: repeat(3, 84px); gap: 10px; margin-top: 8px; }
+    .sc-keys.busy { opacity: 0.5; pointer-events: none; }
+    .sc-key { height: 62px; border-radius: 14px; border: 0; background: #151b2e; color: var(--text); font-size: 26px; font-weight: 700; }
+    .sc-key:active { background: var(--yellow); color: #111; }
+    .sc-key:disabled { visibility: hidden; }
+    .sc-hidden { position: absolute; opacity: 0; width: 1px; height: 1px; pointer-events: none; }
+    .sc-bar { position: absolute; z-index: 6; top: calc(10px + env(safe-area-inset-top)); left: calc(10px + env(safe-area-inset-left)); right: calc(10px + env(safe-area-inset-right)); display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 12px; background: var(--panel); font-size: 13px; font-weight: 650; }
+    .sc-dot { width: 9px; height: 9px; border-radius: 50%; background: #3ecf8e; flex: none; }
+    .sc-bar.paused .sc-dot { background: #f5a524; }
+    .sc-bar-pile { color: var(--yellow); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1; }
+    .sc-leave { border: 0; background: transparent; color: var(--muted); font: inherit; text-decoration: underline; min-height: 32px; }
+    .sc-flash { position: absolute; z-index: 7; left: 50%; top: 42%; transform: translate(-50%, -50%); padding: 12px 18px; border-radius: 14px; font-size: 20px; font-weight: 800; background: rgba(5, 8, 22, 0.9); pointer-events: none; }
+    .sc-flash.ok { color: #3ecf8e; border: 2px solid #3ecf8e; }
+    .sc-flash.check { color: #f5a524; border: 2px solid #f5a524; }
+    /* Shutter sits in the bottom safe band; dock pads above it so camera select is tappable. */
+    .sc-shutter { position: absolute; z-index: 8; left: 50%; bottom: calc(16px + env(safe-area-inset-bottom)); transform: translateX(-50%); min-width: 150px; height: 56px; border-radius: 28px; border: 0; background: var(--yellow); color: #111; font-size: 17px; font-weight: 800; }
+    body.scan-connect .game-rail, body.scan-connect .catalog-status, body.scan-connect .dock .controls, body.scan-connect #multiList { display: none !important; }
+    body.scan-connect .dock {
+      padding-bottom: calc(88px + env(safe-area-inset-bottom));
+      z-index: 7;
+      pointer-events: none;
+    }
+    body.scan-connect .dock .camera-controls {
+      pointer-events: auto;
+      justify-content: center;
+      padding: 0 8px 8px;
+    }
+    body.scan-connect .warming { top: calc(62px + env(safe-area-inset-top)); left: 12px; }
+    @media (max-width: 430px) {
+      body.scan-connect .dock .camera-controls select { width: min(220px, 72vw); }
+      .sc-shutter { min-width: 140px; height: 52px; font-size: 16px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="stage">
+    <video id="live" playsinline autoplay muted></video>
+    <img class="preview" id="shot" alt="" hidden>
+    <canvas id="overlay"></canvas>
+
+    <div class="boot" id="boot" aria-hidden="true">
+      <img src="/static/pokoin-icon.png" alt="Pokoin">
+    </div>
+
+    <nav class="game-rail" aria-label="Scan catalog">
+      <div class="game-group" role="group" aria-label="Game">
+        <button type="button" class="letter on" id="gameP" title="Pokémon" aria-label="Pokémon" aria-pressed="true">P</button>
+        <button type="button" class="letter" id="gameO" title="One Piece" aria-label="One Piece" aria-pressed="false">O</button>
+        <button type="button" class="letter" id="gameR" title="Riftbound" aria-label="Riftbound" aria-pressed="false">R</button>
+      </div>
+      <div class="language-group" role="group" aria-label="Catalog language">
+        <button type="button" class="lang on" id="langEn" aria-label="Western catalog" aria-pressed="true">EN</button>
+        <button type="button" class="lang" id="langJp" aria-label="Japanese catalog" aria-pressed="false">JP</button>
+        <button type="button" class="lang" id="langCn" aria-label="Chinese catalog" aria-pressed="false">CN</button>
+        <button type="button" class="lang" id="langExtra" aria-label="Generic singles catalog" aria-pressed="false">GS</button>
+      </div>
+    </nav>
+    <div class="catalog-status" role="status"><span id="catalogLabel">Pokémon · Western</span></div>
+
+    <div class="warming" id="warming" role="status">Warming up</div>
+
+    <div class="dock">
+      <div class="multi-list" id="multiList"></div>
+      <div class="camera-controls" id="cameraControls" hidden>
+        <label for="cameraSelect">Camera</label>
+        <select id="cameraSelect" aria-label="Camera"></select>
+      </div>
+      <div class="controls">
+        <div class="seg" role="group" aria-label="Mode">
+          <button type="button" class="on" id="modeSingle">Single</button>
+          <button type="button" id="modeMulti">Multi</button>
+        </div>
+        <button type="button" class="icon" id="torch" disabled title="Flash" aria-label="Flash">⚡</button>
+        <button type="button" class="icon" id="gallery" title="Gallery" aria-label="Gallery">🖼</button>
+        <button type="button" class="icon" id="resumeCamera" title="Resume camera" aria-label="Resume camera" hidden>↻</button>
+        <input id="file" type="file" accept="image/*">
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/scan-connect.js"></script>
+  <script>
+    const LIVE_MS = 280;
+    const LIVE_MS_CONNECT = 450;
+    const ACCEPT = 0.72;
+    const SCAN_HOSTS = new Set(["cardscan.pokoin.com", "scan.pokoin.com"]);
+
+    const live = document.getElementById("live");
+    const shot = document.getElementById("shot");
+    const overlay = document.getElementById("overlay");
+    const boot = document.getElementById("boot");
+    const warming = document.getElementById("warming");
+    const multiList = document.getElementById("multiList");
+    const torchBtn = document.getElementById("torch");
+    const modeSingle = document.getElementById("modeSingle");
+    const modeMulti = document.getElementById("modeMulti");
+
+    let stream = null;
+    let track = null;
+    let busy = false;
+    let locked = false;
+    let liveTimer = null;
+    let mode = "single";
+    let torchOn = false;
+    let pulse = 0;
+    let pulseRaf = 0;
+    let lastBoxes = null;
+    let lastImgW = 0;
+    let lastImgH = 0;
+    let camReady = false;
+    let cameraViewVersion = 0;
+
+    const catalogSpecs = {
+      pokemon: { label: "Pokémon", languages: { western: "Western", japanese: "Japanese", chinese: "Chinese", generic: "Generic singles" } },
+      one_piece: { label: "One Piece", languages: { english: "English", japanese: "Japanese", singles: "Singles" } },
+      riftbound: { label: "Riftbound", languages: { western: "All cards" } },
+    };
+    const gameButtons = { pokemon: document.getElementById("gameP"), one_piece: document.getElementById("gameO"), riftbound: document.getElementById("gameR") };
+    const languageButtons = { western: document.getElementById("langEn"), japanese: document.getElementById("langJp"), chinese: document.getElementById("langCn") };
+    const extraButton = document.getElementById("langExtra");
+    function extraLanguage() {
+      if (game === "pokemon") return "generic";
+      if (game === "one_piece") return "singles";
+      return "";
+    }
+    const catalogLabel = document.getElementById("catalogLabel");
+    const resumeCamera = document.getElementById("resumeCamera");
+    let game = "pokemon";
+    let language = "western";
+    let scanRevision = 0;
+    let requestController = null;
+    let availableCatalogs = null;
+    let gallerySource = null;
+    let galleryObjectUrl = null;
+    function catalogId() { return game + "_" + language; }
+    function invalidateScan() {
+      scanRevision += 1;
+      if (requestController) requestController.abort();
+      drawBoxes(null, 0, 0);
+      multiList.classList.remove("open"); multiList.replaceChildren();
+    }
+    function updateCatalogUI() {
+      for (const [key, button] of Object.entries(gameButtons)) {
+        button.classList.toggle("on", key === game);
+        button.setAttribute("aria-pressed", String(key === game));
+        button.disabled = !!availableCatalogs && !Array.from(availableCatalogs).some(id => id.startsWith(key + "_"));
+      }
+      for (const [key, button] of Object.entries(languageButtons)) {
+        const lang = key === "western" && game === "one_piece" ? "english" : key;
+        button.hidden = !(lang in catalogSpecs[game].languages);
+        button.disabled = !!availableCatalogs && !availableCatalogs.has(game + "_" + lang);
+        button.classList.toggle("on", lang === language);
+        button.setAttribute("aria-pressed", String(lang === language));
+        button.setAttribute("aria-label", (catalogSpecs[game].languages[lang] || lang) + " catalog");
+        button.title = button.getAttribute("aria-label");
+        if (key === "western") button.textContent = game === "riftbound" ? "ALL" : "EN";
+      }
+      const extraLang = extraLanguage();
+      extraButton.hidden = !extraLang;
+      if (extraLang) {
+        extraButton.disabled = !!availableCatalogs && !availableCatalogs.has(game + "_" + extraLang);
+        extraButton.classList.toggle("on", language === extraLang);
+        extraButton.setAttribute("aria-pressed", String(language === extraLang));
+        extraButton.textContent = extraLang === "generic" ? "GS" : "SG";
+        extraButton.setAttribute("aria-label", catalogSpecs[game].languages[extraLang] + " catalog");
+        extraButton.title = extraButton.getAttribute("aria-label");
+      }
+      catalogLabel.textContent = catalogSpecs[game].label + " · " + catalogSpecs[game].languages[language];
+    }
+    function selectCatalog(nextGame, nextLanguage) {
+      if (!(nextGame in catalogSpecs) || !(nextLanguage in catalogSpecs[nextGame].languages)) return;
+      if (availableCatalogs && !availableCatalogs.has(nextGame + "_" + nextLanguage)) return;
+      game = nextGame; language = nextLanguage;
+      invalidateScan(); updateCatalogUI();
+      const url = new URL(location.href); url.searchParams.set("catalog", catalogId());
+      history.replaceState(null, "", url);
+      warming.hidden = camReady || !!gallerySource;
+      if (!camReady && !gallerySource) warming.textContent = "Camera unavailable — use Gallery or retry.";
+      if (gallerySource) scanGallery();
+      else { stopLive(); scheduleLive(100); }
+    }
+    async function loadCatalogs() {
+      try {
+        const url = new URL(identifyUrl(), location.href);
+        url.pathname = url.pathname.replace(/identify$/, "catalogs");
+        const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
+        if (!res.ok) throw new Error("catalog service unavailable");
+        const data = await res.json(); availableCatalogs = new Set(data.catalogs.map(c => c.id));
+        updateCatalogUI();
+        if (!availableCatalogs.has(catalogId())) {
+          warming.textContent = "Selected catalog unavailable. Choose another game or language."; warming.hidden = false;
+        }
+      } catch (_) {
+        warming.textContent = "Catalog service unavailable. Try again shortly."; warming.hidden = false;
+      }
+    }
+
+    const cameraSelect = document.getElementById("cameraSelect");
+    const cameraControls = document.getElementById("cameraControls");
+    let cameraRequestVersion = 0;
+    function preferredCamera(devices, currentId) {
+      const cameras = devices.filter(d => d.kind === "videoinput");
+      const ranked = cameras.map(device => {
+        const label = device.label.toLowerCase();
+        const rear = /back|rear|environment|bagkamera|bagside|ruck|rück|arriere|arrière|posteriore|trasera/.test(label);
+        const wide = /wide|vidvinkel|weitwinkel|grand.angle|grandangol/.test(label);
+        const avoid = /ultra|\btele(?:photo|foto|obiettivo)?\b|front|user|facetime|selfie/.test(label);
+        const combined = /dual|triple|fusion|virtual/.test(label);
+        return {device,score:(rear ? 200 : 0)+(wide ? 50 : 0)-(avoid ? 1000 : 0)-(combined ? 400 : 0)};
+      }).filter(item => item.score > 0).sort((a,b) => b.score-a.score);
+      return ranked[0]?.device || cameras.find(d => d.deviceId === currentId) || cameras[0];
+    }
+    async function configureNormalCamera(activeTrack) {
+      const caps = activeTrack.getCapabilities ? activeTrack.getCapabilities() : {};
+      const settings = {};
+      if (caps.zoom && Number.isFinite(caps.zoom.min) && Number.isFinite(caps.zoom.max)) {
+        settings.zoom = Math.max(caps.zoom.min, Math.min(1, caps.zoom.max));
+      }
+      if (caps.focusMode && caps.focusMode.includes("continuous")) settings.focusMode = "continuous";
+      if (Object.keys(settings).length) {
+        try { await activeTrack.applyConstraints({...cameraConstraints(),advanced:[settings]}); } catch (_) { /* Some browsers report read-only controls. */ }
+      }
+    }
+    function populateCameras(devices, selectedId) {
+      cameraSelect.replaceChildren();
+      const cameras = devices.filter(d => d.kind === "videoinput");
+      for (const [index, device] of cameras.entries()) {
+        const option = document.createElement("option");
+        option.value = device.deviceId; option.textContent = device.label || "Camera " + (index + 1);
+        option.selected = device.deviceId === selectedId; cameraSelect.append(option);
+      }
+      cameraControls.hidden = cameras.length < 2;
+    }
+    cameraSelect.addEventListener("change", () => startCam(cameraSelect.value));
+
+    function cameraConstraints() {
+      // Constraints use the sensor's primary orientation. The browser rotates
+      // the delivered frame; swapping these with the viewport double-rotates it.
+      return {
+        width: { ideal: 1280 },
+        height: { ideal: 960 },
+        aspectRatio: { ideal: 4 / 3 },
+        resizeMode: { ideal: "none" },
+      };
+    }
+
+    function invalidateCameraView() {
+      cameraViewVersion += 1;
+      if (!live.hidden) drawBoxes(null, 0, 0);
+    }
+
+    function cameraViewChanged() {
+      // Uploads contain the full sensor frame, independent of viewport layout.
+      // Only the video's resize event invalidates a changed capture geometry.
+      paintOverlay();
+    }
+
+    function identifyUrl() {
+      if (window.CARDSCAN_API) {
+        return String(window.CARDSCAN_API).replace(/\/$/, "") + "/identify";
+      }
+      if (SCAN_HOSTS.has(location.hostname)) return "/identify";
+      return "/cardscan/identify";
+    }
+
+    function identifyEndpoint(isLive) {
+      const url = new URL(identifyUrl(), location.href);
+      url.searchParams.set("catalog", catalogId());
+      url.searchParams.set("multi", mode === "multi" ? "1" : "0");
+      if (isLive) {
+        url.searchParams.set("live", "1");
+        url.searchParams.set("top_k", mode === "multi" ? "8" : "3");
+      } else {
+        url.searchParams.set("top_k", "5");
+      }
+      return url.toString();
+    }
+
+    function safeCardUrl(hit) {
+      if (!hit || !hit.public_id || !/^\d+$/.test(String(hit.public_id))) return "";
+      try {
+        const url = new URL(hit.pokoin_url);
+        const host = {pokemon:"pokoin.com", one_piece:"onepiece.pokoin.com", riftbound:"riftbound.pokoin.com"}[game];
+        return url.protocol === "https:" && url.host === host && url.pathname === "/" + hit.public_id && !url.search && !url.hash ? url.href : "";
+      } catch (_) { return ""; }
+    }
+    function pokoinUrl(data) { return safeCardUrl(data.top1); }
+
+    function scheduleLive(delayMs) {
+      if (locked || !stream) return;
+      if (liveTimer !== null) clearTimeout(liveTimer);
+      liveTimer = setTimeout(tick, Math.max(80, delayMs == null ? LIVE_MS : delayMs));
+    }
+
+    function stopLive() {
+      if (typeof liveTimer === "number") clearTimeout(liveTimer);
+      liveTimer = null;
+    }
+
+    async function startCam(deviceId) {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        warming.textContent = "Camera unavailable — use Gallery"; warming.hidden = false; return;
+      }
+      const requestVersion = ++cameraRequestVersion;
+      invalidateScan(); invalidateCameraView(); stopLive(); camReady = false;
+      if (stream) stream.getTracks().forEach(t => t.stop());
+      stream = null; track = null; torchOn = false;
+      torchBtn.classList.remove("on"); torchBtn.disabled = true;
+      warming.textContent = "Opening camera…"; warming.hidden = false;
+      let nextStream = null;
+      try {
+        const constraints = id => ({audio:false,video:{...cameraConstraints(),...(id ? {deviceId:{exact:id}} : {facingMode:{ideal:"environment"}})}});
+        nextStream = await navigator.mediaDevices.getUserMedia(constraints(deviceId));
+        if (requestVersion !== cameraRequestVersion) { nextStream.getTracks().forEach(t=>t.stop()); return; }
+        let active = nextStream.getVideoTracks()[0];
+        let devices = [];
+        try { devices = await navigator.mediaDevices.enumerateDevices(); } catch (_) {}
+        if (requestVersion !== cameraRequestVersion) { nextStream.getTracks().forEach(t=>t.stop()); return; }
+        const currentId = active.getSettings ? active.getSettings().deviceId : "";
+        const preferred = deviceId ? null : preferredCamera(devices,currentId);
+        if (preferred && preferred.deviceId && preferred.deviceId !== currentId) {
+          nextStream.getTracks().forEach(t=>t.stop());
+          try { nextStream = await navigator.mediaDevices.getUserMedia(constraints(preferred.deviceId)); }
+          catch (_) { nextStream = await navigator.mediaDevices.getUserMedia(constraints(currentId)); }
+          active = nextStream.getVideoTracks()[0];
+        }
+        if (requestVersion !== cameraRequestVersion) { nextStream.getTracks().forEach(t=>t.stop()); return; }
+        await configureNormalCamera(active);
+        if (requestVersion !== cameraRequestVersion) { nextStream.getTracks().forEach(t=>t.stop()); return; }
+        stream = nextStream; track = active; live.srcObject = stream;
+        if (galleryObjectUrl) URL.revokeObjectURL(galleryObjectUrl);
+        gallerySource = null; galleryObjectUrl = null; shot.removeAttribute("src");
+        live.hidden = false; shot.hidden = true; cameraViewChanged(); camReady = true;
+        populateCameras(devices, active.getSettings ? active.getSettings().deviceId : "");
+        const caps = track.getCapabilities ? track.getCapabilities() : {};
+        torchBtn.disabled = !caps.torch; resumeCamera.hidden = true;
+        warming.textContent = "Point at a card. Keep all four corners visible."; warming.hidden = false;
+        scheduleLive(LIVE_MS);
+      } catch (_) {
+        if (nextStream) nextStream.getTracks().forEach(t=>t.stop());
+        if (requestVersion !== cameraRequestVersion) return;
+        resumeCamera.hidden = false; warming.textContent = "Camera unavailable — use Gallery or retry."; warming.hidden = false;
+      }
+    }
+
+    function blobFromCanvas(source, max, quality = 0.72) {
+      const canvas = document.createElement("canvas");
+      const w = source.videoWidth || source.naturalWidth || source.width;
+      const h = source.videoHeight || source.naturalHeight || source.height;
+      if (!w || !h) return Promise.resolve(null);
+      // Preserve the complete sensor frame: preview and overlays both use contain.
+      const crop = { x: 0, y: 0, w, h };
+      const scale = Math.min(1, max / Math.max(crop.w, crop.h));
+      canvas.width = Math.max(1, Math.round(crop.w * scale));
+      canvas.height = Math.max(1, Math.round(crop.h * scale));
+      canvas.getContext("2d", { alpha: false }).drawImage(
+        source, crop.x, crop.y, crop.w, crop.h, 0, 0, canvas.width, canvas.height
+      );
+      const q = Math.min(0.92, Math.max(0.4, Number(quality) || 0.72));
+      return new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", q));
+    }
+
+    function mapContain(xy, imgW, imgH, viewW, viewH) {
+      const scale = Math.min(viewW / imgW, viewH / imgH);
+      const dx = (viewW - imgW * scale) / 2;
+      const dy = (viewH - imgH * scale) / 2;
+      return {
+        x: xy[0] * scale + dx,
+        y: xy[1] * scale + dy,
+        w: (xy[2] - xy[0]) * scale,
+        h: (xy[3] - xy[1]) * scale,
+      };
+    }
+
+    /** Pokémon card face is 63×88 mm — lock overlay to that aspect around the YOLO box. */
+    const POKEMON_CARD_ASPECT = 63 / 88;
+    function fitPokemonCardRect(r) {
+      const cx = r.x + r.w / 2;
+      const cy = r.y + r.h / 2;
+      const wFromH = r.h * POKEMON_CARD_ASPECT;
+      const hFromW = r.w / POKEMON_CARD_ASPECT;
+      let w;
+      let h;
+      if (wFromH >= r.w) {
+        w = wFromH;
+        h = r.h;
+      } else {
+        w = r.w;
+        h = hFromW;
+      }
+      return { x: cx - w / 2, y: cy - h / 2, w, h };
+    }
+
+    function drawBoxes(boxes, imgW, imgH) {
+      lastBoxes = boxes || null;
+      lastImgW = imgW || 0;
+      lastImgH = imgH || 0;
+      paintOverlay();
+    }
+
+    function paintOverlay() {
+      const ctx = overlay.getContext("2d");
+      const dpr = devicePixelRatio || 1;
+      overlay.width = overlay.clientWidth * dpr;
+      overlay.height = overlay.clientHeight * dpr;
+      ctx.clearRect(0, 0, overlay.width, overlay.height);
+      if (!lastBoxes || !lastBoxes.length || !lastImgW || !lastImgH) return;
+      const alpha = 0.55 + 0.4 * (0.5 + 0.5 * Math.sin(pulse * Math.PI * 2));
+      ctx.strokeStyle = "rgba(250,204,21," + alpha.toFixed(3) + ")";
+      ctx.lineWidth = 3 * dpr;
+      const limit = mode === "multi" ? Math.min(lastBoxes.length, 16) : 1;
+      const snapCard = game === "pokemon";
+      for (let i = 0; i < limit; i += 1) {
+        const xy = lastBoxes[i].xyxy || [];
+        if (xy.length < 4) continue;
+        let r = mapContain(xy, lastImgW, lastImgH, overlay.width, overlay.height);
+        if (snapCard) r = fitPokemonCardRect(r);
+        ctx.strokeRect(r.x, r.y, r.w, r.h);
+      }
+    }
+
+    function startPulse() {
+      const t0 = performance.now();
+      function frame(now) {
+        pulse = ((now - t0) % 700) / 700;
+        paintOverlay();
+        pulseRaf = requestAnimationFrame(frame);
+      }
+      pulseRaf = requestAnimationFrame(frame);
+    }
+
+    function renderMulti(cards, candidates = false) {
+      multiList.replaceChildren();
+      const hits = (cards || []).map(c => c.top1).filter(hit => hit && hit.score >= (candidates ? 0.60 : ACCEPT));
+      for (const hit of hits) {
+        const href = safeCardUrl(hit);
+        const row = document.createElement(href ? "a" : "div");
+        row.className = "multi-row";
+        if (href) {
+          row.href = href;
+          row.setAttribute("aria-label", "Open " + (hit.name || "card") + " on Pokoin");
+        }
+        const pct = document.createElement("span"); pct.className = "pct"; pct.textContent = Math.round(hit.score * 100) + "%";
+        const title = document.createElement("span"); title.className = "title"; title.textContent = hit.name || "Card";
+        row.append(pct, title);
+        if (href) {
+          const action = document.createElement("span"); action.textContent = "Open";
+          row.append(action);
+        }
+        multiList.append(row);
+      }
+      multiList.classList.toggle("open", (mode === "multi" || candidates) && hits.length > 0);
+    }
+
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, (c) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+      }[c]));
+    }
+
+    function setMode(next) {
+      mode = next;
+      invalidateScan();
+      modeSingle.classList.toggle("on", mode === "single");
+      modeMulti.classList.toggle("on", mode === "multi");
+      if (mode !== "multi") {
+        multiList.classList.remove("open");
+        multiList.innerHTML = "";
+      }
+      paintOverlay();
+      if (gallerySource) scanGallery();
+      else { stopLive(); scheduleLive(100); }
+    }
+
+    async function toggleTorch() {
+      if (!track) return;
+      const caps = track.getCapabilities && track.getCapabilities();
+      if (!caps || !caps.torch) return;
+      torchOn = !torchOn;
+      try {
+        await track.applyConstraints({
+          ...(track.getConstraints ? track.getConstraints() : cameraConstraints()),
+          advanced: [{ torch: torchOn }],
+        });
+        torchBtn.classList.toggle("on", torchOn);
+      } catch (err) {
+        torchOn = false;
+        torchBtn.classList.remove("on");
+      }
+    }
+
+    async function openPokoin(url, top) {
+      if (!url || locked) return;
+      locked = true;
+      stopLive();
+      renderMulti([{top1:top}], true);
+      warming.textContent = "Opening " + (top.name || "card") + " on Pokoin…";
+      warming.hidden = false;
+      try { location.assign(url); }
+      catch (_) {
+        locked = false;
+        warming.textContent = "Tap Open below to open this card on Pokoin.";
+      }
+    }
+
+    async function identify(blob, opts) {
+      const livePass = !!(opts && opts.live);
+      const revision = scanRevision;
+      const selectedCatalog = catalogId();
+      const controller = new AbortController();
+      if (requestController) requestController.abort();
+      requestController = controller;
+      const timeout = setTimeout(() => controller.abort(), 20000);
+      const body = new FormData(); body.append("file", blob, "card.jpg");
+      let data;
+      const requestAt = Date.now();
+      let respondedAt = 0;
+      try {
+        const res = await fetch(identifyEndpoint(livePass), { method: "POST", body, signal: controller.signal });
+        data = await res.json();
+        respondedAt = Date.now();
+        if (revision !== scanRevision || (livePass && (opts.viewVersion !== cameraViewVersion || live.hidden))) return null;
+        if (!res.ok) throw new Error(typeof data.detail === "string" ? data.detail : "Scan request failed");
+        if (data.catalog !== selectedCatalog) throw new Error("Unexpected catalog response");
+        if (data.busy) { warming.textContent = "Scanner is busy — retrying…"; warming.hidden = false; return data; }
+        warming.hidden = true;
+      } catch (err) {
+        if (revision === scanRevision) {
+          warming.textContent = err.name === "AbortError" ? "Scan timed out. Please try again." : "Scan unavailable. Please try again.";
+          warming.hidden = false;
+        }
+        return null;
+      } finally {
+        clearTimeout(timeout);
+        if (requestController === controller) requestController = null;
+      }
+      drawBoxes(data.boxes, data.img_w, data.img_h);
+      if (scanConnect) {
+        // Paired with the dashboard: never open the card page; the phone only reports scans.
+        if (livePass) scanConnect.onResult(data, { blob, capturedAt: opts.capturedAt, requestAt, respondedAt });
+        return data;
+      }
+      if (mode === "multi") {
+        renderMulti(data.cards || []);
+        if (!livePass && !multiList.classList.contains("open")) { warming.textContent = "No confident matches. Try a clearer photo."; warming.hidden = false; }
+        return data;
+      }
+      const pokoin = pokoinUrl(data);
+      const top = data.top1;
+      if (pokoin && top.score >= ACCEPT) {
+        // A recognized Single card uses the same acceptance level as Gallery.
+        // Do not wait for a second frame after returning an accepted match.
+        await openPokoin(pokoin, top);
+      } else if (livePass) {
+        renderMulti(top && top.score >= 0.60 ? [{top1:top}] : [], true);
+        warming.textContent = top && top.score >= 0.60 ? "Possible match — tap Open below." : data.boxes?.length ? "Card detected; not identified yet. Keep its edges visible." : "Looking for a card. Keep all four corners visible.";
+        warming.hidden = false;
+      } else {
+        renderMulti((data.hits || []).slice(0,3).map(top1 => ({top1})), true);
+        warming.textContent = multiList.classList.contains("open") ? "Possible matches — tap a card to open." : "No confident match. Check the catalog or try a clearer photo."; warming.hidden = false;
+      }
+      return data;
+    }
+
+    async function scanGallery() {
+      if (!gallerySource) return;
+      const source = gallerySource; const revision = scanRevision;
+      stopLive(); live.hidden = true; shot.hidden = false; resumeCamera.hidden = false;
+      warming.textContent = "Scanning photo…"; warming.hidden = false;
+      const blob = await blobFromCanvas(source, 1280);
+      if (!blob || revision !== scanRevision) return;
+      // Live inference can still be finishing when a photo is chosen.
+      for (let attempt = 0; attempt < 12; attempt += 1) {
+        if (revision !== scanRevision) return;
+        const result = await identify(blob, {live:false});
+        if (!result || !result.busy) return;
+        await new Promise(resolve => setTimeout(resolve,500));
+      }
+      if (revision === scanRevision) { warming.textContent = "Scanner is busy. Try again shortly."; warming.hidden = false; }
+    }
+
+    async function tick() {
+      if (locked || !stream || live.hidden || !camReady) return;
+      if (busy) { scheduleLive(250); return; }
+      if (availableCatalogs && !availableCatalogs.has(catalogId())) { scheduleLive(1000); return; }
+      busy = true;
+      try {
+        const viewVersion = cameraViewVersion;
+        const capturedAt = Date.now();
+        // Scan Connect on cellular: smaller JPEG so live identify finishes
+        // instead of stacking 2–3 s uploads behind a global GPU lock.
+        const connectMode = !!scanConnect;
+        const blob = await blobFromCanvas(live, connectMode ? 640 : 960, connectMode ? 0.5 : 0.72);
+        if (!blob || viewVersion !== cameraViewVersion) {
+          scheduleLive(connectMode ? LIVE_MS_CONNECT : LIVE_MS);
+          return;
+        }
+        const data = await identify(blob, { live: true, viewVersion, capturedAt });
+        if (locked) return;
+        if (data && data.busy) {
+          scheduleLive(250);
+          return;
+        }
+        scheduleLive(connectMode ? LIVE_MS_CONNECT : LIVE_MS);
+      } finally {
+        busy = false;
+      }
+    }
+
+    modeSingle.addEventListener("click", () => setMode("single"));
+    modeMulti.addEventListener("click", () => setMode("multi"));
+    torchBtn.addEventListener("click", () => { toggleTorch(); });
+    window.addEventListener("resize", cameraViewChanged);
+    window.addEventListener("orientationchange", cameraViewChanged);
+    if (screen.orientation && screen.orientation.addEventListener) {
+      screen.orientation.addEventListener("change", cameraViewChanged);
+    }
+    live.addEventListener("resize", invalidateCameraView);
+
+    for (const [key, button] of Object.entries(gameButtons)) {
+      button.addEventListener("click", () => selectCatalog(key, Object.keys(catalogSpecs[key].languages)[0]));
+    }
+    for (const [key, button] of Object.entries(languageButtons)) {
+      button.addEventListener("click", () => selectCatalog(game, key === "western" && game === "one_piece" ? "english" : key));
+    }
+    extraButton.addEventListener("click", () => {
+      const extraLang = extraLanguage();
+      if (extraLang) selectCatalog(game, extraLang);
+    });
+    document.getElementById("gallery").addEventListener("click", () => document.getElementById("file").click());
+    resumeCamera.addEventListener("click", () => {
+      invalidateScan(); gallerySource = null;
+      if (galleryObjectUrl) URL.revokeObjectURL(galleryObjectUrl);
+      galleryObjectUrl = null; shot.removeAttribute("src"); shot.hidden = true; live.hidden = false;
+      resumeCamera.hidden = true; warming.hidden = true;
+      if (stream) scheduleLive(100); else startCam();
+    });
+    document.getElementById("file").addEventListener("change", async (ev) => {
+      const file = ev.target.files && ev.target.files[0];
+      if (!file) return;
+      invalidateScan(); invalidateCameraView(); stopLive(); locked = false;
+      const revision = scanRevision;
+      if (galleryObjectUrl) URL.revokeObjectURL(galleryObjectUrl);
+      galleryObjectUrl = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        if (revision !== scanRevision) return;
+        gallerySource = img; shot.src = img.src; scanGallery();
+      };
+      img.onerror = () => {
+        if (revision !== scanRevision) return;
+        warming.textContent = "This photo could not be opened. Try JPEG or PNG."; warming.hidden = false;
+        resumeCamera.hidden = false;
+      };
+      img.src = galleryObjectUrl; ev.target.value = "";
+    });
+    const initialCatalog = new URL(location.href).searchParams.get("catalog");
+    for (const [key, spec] of Object.entries(catalogSpecs)) {
+      for (const lang of Object.keys(spec.languages)) {
+        if (initialCatalog === key + "_" + lang) { game = key; language = lang; }
+      }
+    }
+    updateCatalogUI(); loadCatalogs();
+    window.addEventListener("pagehide", () => {
+      cameraRequestVersion += 1; invalidateScan(); stopLive(); cancelAnimationFrame(pulseRaf);
+      if (stream) stream.getTracks().forEach(t => t.stop());
+    });
+    window.addEventListener("pageshow", ev => { if (ev.persisted) location.reload(); });
+
+    setTimeout(() => boot.classList.add("hide"), 500);
+    startPulse();
+    // scan.pokoin.com/connect pairs first and starts the camera itself.
+    const scanConnect = window.ScanConnect && window.ScanConnect.isConnectPath && window.ScanConnect.isConnectPath(location)
+      ? (document.body.classList.add("scan-connect"), window.ScanConnect.start(window))
+      : null;
+    if (scanConnect) {
+      // Add card: one higher-res identify, not a stale live preview.
+      scanConnect.captureNow = async () => {
+        if (!camReady || live.hidden) return null;
+        const capturedAt = Date.now();
+        const blob = await blobFromCanvas(live, 960, 0.72);
+        if (!blob) return null;
+        const requestAt = Date.now();
+        const data = await identify(blob, { live: false, capturedAt });
+        if (!data || data.busy) return null;
+        return { data, context: { blob, capturedAt, requestAt, respondedAt: Date.now() } };
+      };
+    }
+    if (!scanConnect) startCam();
+  </script>
+</body>
+</html>

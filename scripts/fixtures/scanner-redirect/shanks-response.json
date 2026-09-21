@@ -1,0 +1,205 @@
+{
+  "ok": true,
+  "identity": "public_id",
+  "catalog": "one_piece_japanese",
+  "game": "one_piece",
+  "detect_ms": 7.6,
+  "identify_ms": 189.5,
+  "embed_ms": 175.0,
+  "search_ms": 14.4,
+  "worker": "nezopt",
+  "img_w": 284,
+  "img_h": 410,
+  "orientations": 8,
+  "immediate": false,
+  "boxes": [
+    {
+      "xyxy": [
+        0.0,
+        0.0,
+        284.0,
+        410.0
+      ],
+      "conf": 1.0,
+      "detector": "card-frame"
+    }
+  ],
+  "hits": [
+    {
+      "id": "812540",
+      "ct_id": "406270",
+      "public_id": "812540",
+      "name": "Shanks",
+      "collector_number": "OP17-020a",
+      "set": "OP-17: The World's Strongest Warriors",
+      "game": "one_piece",
+      "language": "japanese",
+      "image_url": "https://www.onepiece-cardgame.com/images/cardlist/card/OP17-020_p1.png",
+      "pokoin_url": "https://onepiece.pokoin.com/812540",
+      "reference_source": "official-japanese-cardlist",
+      "score": 0.7662
+    },
+    {
+      "id": "780542",
+      "ct_id": "390271",
+      "public_id": "780542",
+      "name": "Enel",
+      "collector_number": "OP05-098",
+      "set": "Premium Card Collection",
+      "game": "one_piece",
+      "language": "japanese",
+      "image_url": "https://cdn.pokoin.com/one-piece/390271_enel.jpg",
+      "pokoin_url": "https://onepiece.pokoin.com/780542",
+      "score": 0.5013
+    },
+    {
+      "id": "798956",
+      "ct_id": "399478",
+      "public_id": "798956",
+      "name": "Ace & Sabo & Luffy",
+      "collector_number": "P-122",
+      "set": "Magazine Promos",
+      "game": "one_piece",
+      "language": "japanese",
+      "image_url": "https://cdn.pokoin.com/one-piece/399478_ace-sabo-luffy.jpg",
+      "pokoin_url": "https://onepiece.pokoin.com/798956",
+      "score": 0.4576
+    },
+    {
+      "id": "813652",
+      "ct_id": "406826",
+      "public_id": "813652",
+      "name": "Portgas.D.Ace",
+      "collector_number": "P-119",
+      "set": "Asian Promos",
+      "game": "one_piece",
+      "language": "japanese",
+      "image_url": "https://cdn.pokoin.com/one-piece/406826_portgas-d-ace.png",
+      "pokoin_url": "https://onepiece.pokoin.com/813652",
+      "score": 0.4428
+    },
+    {
+      "id": "800870",
+      "ct_id": "400435",
+      "public_id": "800870",
+      "name": "Yamato",
+      "collector_number": "P-046",
+      "set": "Magazine Promos",
+      "game": "one_piece",
+      "language": "japanese",
+      "image_url": "https://cdn.pokoin.com/one-piece/400435_yamato.webp",
+      "pokoin_url": "https://onepiece.pokoin.com/800870",
+      "score": 0.4422
+    }
+  ],
+  "top1": {
+    "id": "812540",
+    "ct_id": "406270",
+    "public_id": "812540",
+    "name": "Shanks",
+    "collector_number": "OP17-020a",
+    "set": "OP-17: The World's Strongest Warriors",
+    "game": "one_piece",
+    "language": "japanese",
+    "image_url": "https://www.onepiece-cardgame.com/images/cardlist/card/OP17-020_p1.png",
+    "pokoin_url": "https://onepiece.pokoin.com/812540",
+    "reference_source": "official-japanese-cardlist",
+    "score": 0.7662
+  },
+  "cards": [
+    {
+      "box": {
+        "xyxy": [
+          0.0,
+          0.0,
+          284.0,
+          410.0
+        ],
+        "conf": 1.0,
+        "detector": "card-frame"
+      },
+      "hits": [
+        {
+          "id": "812540",
+          "ct_id": "406270",
+          "public_id": "812540",
+          "name": "Shanks",
+          "collector_number": "OP17-020a",
+          "set": "OP-17: The World's Strongest Warriors",
+          "game": "one_piece",
+          "language": "japanese",
+          "image_url": "https://www.onepiece-cardgame.com/images/cardlist/card/OP17-020_p1.png",
+          "pokoin_url": "https://onepiece.pokoin.com/812540",
+          "reference_source": "official-japanese-cardlist",
+          "score": 0.7662
+        },
+        {
+          "id": "780542",
+          "ct_id": "390271",
+          "public_id": "780542",
+          "name": "Enel",
+          "collector_number": "OP05-098",
+          "set": "Premium Card Collection",
+          "game": "one_piece",
+          "language": "japanese",
+          "image_url": "https://cdn.pokoin.com/one-piece/390271_enel.jpg",
+          "pokoin_url": "https://onepiece.pokoin.com/780542",
+          "score": 0.5013
+        },
+        {
+          "id": "798956",
+          "ct_id": "399478",
+          "public_id": "798956",
+          "name": "Ace & Sabo & Luffy",
+          "collector_number": "P-122",
+          "set": "Magazine Promos",
+          "game": "one_piece",
+          "language": "japanese",
+          "image_url": "https://cdn.pokoin.com/one-piece/399478_ace-sabo-luffy.jpg",
+          "pokoin_url": "https://onepiece.pokoin.com/798956",
+          "score": 0.4576
+        },
+        {
+          "id": "813652",
+          "ct_id": "406826",
+          "public_id": "813652",
+          "name": "Portgas.D.Ace",
+          "collector_number": "P-119",
+          "set": "Asian Promos",
+          "game": "one_piece",
+          "language": "japanese",
+          "image_url": "https://cdn.pokoin.com/one-piece/406826_portgas-d-ace.png",
+          "pokoin_url": "https://onepiece.pokoin.com/813652",
+          "score": 0.4428
+        },
+        {
+          "id": "800870",
+          "ct_id": "400435",
+          "public_id": "800870",
+          "name": "Yamato",
+          "collector_number": "P-046",
+          "set": "Magazine Promos",
+          "game": "one_piece",
+          "language": "japanese",
+          "image_url": "https://cdn.pokoin.com/one-piece/400435_yamato.webp",
+          "pokoin_url": "https://onepiece.pokoin.com/800870",
+          "score": 0.4422
+        }
+      ],
+      "top1": {
+        "id": "812540",
+        "ct_id": "406270",
+        "public_id": "812540",
+        "name": "Shanks",
+        "collector_number": "OP17-020a",
+        "set": "OP-17: The World's Strongest Warriors",
+        "game": "one_piece",
+        "language": "japanese",
+        "image_url": "https://www.onepiece-cardgame.com/images/cardlist/card/OP17-020_p1.png",
+        "pokoin_url": "https://onepiece.pokoin.com/812540",
+        "reference_source": "official-japanese-cardlist",
+        "score": 0.7662
+      }
+    }
+  ]
+}

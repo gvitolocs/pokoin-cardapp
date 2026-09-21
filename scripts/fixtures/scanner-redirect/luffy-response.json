@@ -1,0 +1,237 @@
+{
+  "ok": true,
+  "identity": "public_id",
+  "catalog": "one_piece_english",
+  "game": "one_piece",
+  "detect_ms": 10.5,
+  "identify_ms": 119.2,
+  "embed_ms": 99.2,
+  "search_ms": 19.8,
+  "worker": "nezopt",
+  "img_w": 933,
+  "img_h": 1600,
+  "orientations": 4,
+  "immediate": false,
+  "boxes": [
+    {
+      "xyxy": [
+        231.11111450195312,
+        324.4444580078125,
+        884.4444580078125,
+        1182.22216796875
+      ],
+      "quad": [
+        [
+          231.11111450195312,
+          324.4444580078125
+        ],
+        [
+          884.4444580078125,
+          340.0
+        ],
+        [
+          844.4444580078125,
+          1182.22216796875
+        ],
+        [
+          262.22222900390625,
+          1180.0
+        ]
+      ],
+      "conf": 1.0,
+      "detector": "card-quad"
+    }
+  ],
+  "hits": [
+    {
+      "id": "489018",
+      "ct_id": "244509",
+      "public_id": "489018",
+      "name": "Monkey.D.Luffy",
+      "collector_number": "OP01-024",
+      "set": "OP-01: Romance Dawn",
+      "game": "one_piece",
+      "language": "english",
+      "image_url": "https://cdn.pokoin.com/one-piece/244509_monkey-d-luffy.jpg",
+      "pokoin_url": "https://onepiece.pokoin.com/489018",
+      "score": 0.78
+    },
+    {
+      "id": "636808",
+      "ct_id": "318404",
+      "public_id": "636808",
+      "name": "Monkey.D.Luffy",
+      "collector_number": "ST01-001",
+      "set": "ST-01: Starter Deck: Straw Hat Crew",
+      "game": "one_piece",
+      "language": "english",
+      "image_url": "https://cdn.pokoin.com/one-piece/318404_monkey-d-luffy.jpg",
+      "pokoin_url": "https://onepiece.pokoin.com/636808",
+      "score": 0.6023
+    },
+    {
+      "id": "506792",
+      "ct_id": "253396",
+      "public_id": "506792",
+      "name": "Monkey.D.Luffy",
+      "collector_number": "ST01-001",
+      "set": "Reprints - Revision Pack",
+      "game": "one_piece",
+      "language": "english",
+      "image_url": "https://cdn.pokoin.com/one-piece/253396_monkey-d-luffy.jpg",
+      "pokoin_url": "https://onepiece.pokoin.com/506792",
+      "score": 0.6017
+    },
+    {
+      "id": "674840",
+      "ct_id": "337420",
+      "public_id": "674840",
+      "name": "Charlotte Pudding",
+      "collector_number": "OP08-067s",
+      "set": "Treasure Cup",
+      "game": "one_piece",
+      "language": "english",
+      "image_url": "https://cdn.pokoin.com/one-piece/337420_charlotte-pudding.jpg",
+      "pokoin_url": "https://onepiece.pokoin.com/674840",
+      "score": 0.5998
+    },
+    {
+      "id": "501296",
+      "ct_id": "250648",
+      "public_id": "501296",
+      "name": "Monkey.D.Luffy",
+      "collector_number": "P-001P3",
+      "set": "One Piece Promos",
+      "game": "one_piece",
+      "language": "english",
+      "image_url": "https://cdn.pokoin.com/one-piece/250648_monkey-d-luffy.jpg",
+      "pokoin_url": "https://onepiece.pokoin.com/501296",
+      "score": 0.5978
+    }
+  ],
+  "top1": {
+    "id": "489018",
+    "ct_id": "244509",
+    "public_id": "489018",
+    "name": "Monkey.D.Luffy",
+    "collector_number": "OP01-024",
+    "set": "OP-01: Romance Dawn",
+    "game": "one_piece",
+    "language": "english",
+    "image_url": "https://cdn.pokoin.com/one-piece/244509_monkey-d-luffy.jpg",
+    "pokoin_url": "https://onepiece.pokoin.com/489018",
+    "score": 0.78
+  },
+  "cards": [
+    {
+      "box": {
+        "xyxy": [
+          231.11111450195312,
+          324.4444580078125,
+          884.4444580078125,
+          1182.22216796875
+        ],
+        "quad": [
+          [
+            231.11111450195312,
+            324.4444580078125
+          ],
+          [
+            884.4444580078125,
+            340.0
+          ],
+          [
+            844.4444580078125,
+            1182.22216796875
+          ],
+          [
+            262.22222900390625,
+            1180.0
+          ]
+        ],
+        "conf": 1.0,
+        "detector": "card-quad"
+      },
+      "hits": [
+        {
+          "id": "489018",
+          "ct_id": "244509",
+          "public_id": "489018",
+          "name": "Monkey.D.Luffy",
+          "collector_number": "OP01-024",
+          "set": "OP-01: Romance Dawn",
+          "game": "one_piece",
+          "language": "english",
+          "image_url": "https://cdn.pokoin.com/one-piece/244509_monkey-d-luffy.jpg",
+          "pokoin_url": "https://onepiece.pokoin.com/489018",
+          "score": 0.78
+        },
+        {
+          "id": "636808",
+          "ct_id": "318404",
+          "public_id": "636808",
+          "name": "Monkey.D.Luffy",
+          "collector_number": "ST01-001",
+          "set": "ST-01: Starter Deck: Straw Hat Crew",
+          "game": "one_piece",
+          "language": "english",
+          "image_url": "https://cdn.pokoin.com/one-piece/318404_monkey-d-luffy.jpg",
+          "pokoin_url": "https://onepiece.pokoin.com/636808",
+          "score": 0.6023
+        },
+        {
+          "id": "506792",
+          "ct_id": "253396",
+          "public_id": "506792",
+          "name": "Monkey.D.Luffy",
+          "collector_number": "ST01-001",
+          "set": "Reprints - Revision Pack",
+          "game": "one_piece",
+          "language": "english",
+          "image_url": "https://cdn.pokoin.com/one-piece/253396_monkey-d-luffy.jpg",
+          "pokoin_url": "https://onepiece.pokoin.com/506792",
+          "score": 0.6017
+        },
+        {
+          "id": "674840",
+          "ct_id": "337420",
+          "public_id": "674840",
+          "name": "Charlotte Pudding",
+          "collector_number": "OP08-067s",
+          "set": "Treasure Cup",
+          "game": "one_piece",
+          "language": "english",
+          "image_url": "https://cdn.pokoin.com/one-piece/337420_charlotte-pudding.jpg",
+          "pokoin_url": "https://onepiece.pokoin.com/674840",
+          "score": 0.5998
+        },
+        {
+          "id": "501296",
+          "ct_id": "250648",
+          "public_id": "501296",
+          "name": "Monkey.D.Luffy",
+          "collector_number": "P-001P3",
+          "set": "One Piece Promos",
+          "game": "one_piece",
+          "language": "english",
+          "image_url": "https://cdn.pokoin.com/one-piece/250648_monkey-d-luffy.jpg",
+          "pokoin_url": "https://onepiece.pokoin.com/501296",
+          "score": 0.5978
+        }
+      ],
+      "top1": {
+        "id": "489018",
+        "ct_id": "244509",
+        "public_id": "489018",
+        "name": "Monkey.D.Luffy",
+        "collector_number": "OP01-024",
+        "set": "OP-01: Romance Dawn",
+        "game": "one_piece",
+        "language": "english",
+        "image_url": "https://cdn.pokoin.com/one-piece/244509_monkey-d-luffy.jpg",
+        "pokoin_url": "https://onepiece.pokoin.com/489018",
+        "score": 0.78
+      }
+    }
+  ]
+}
