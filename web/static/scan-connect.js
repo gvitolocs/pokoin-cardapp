@@ -349,6 +349,31 @@
     const barPile = el('span', { class: 'sc-bar-pile' });
     const leaveBtn = el('button', { type: 'button', class: 'sc-leave', text: 'Disconnect' });
     const bar = el('div', { class: 'sc-bar', hidden: '' }, [el('span', { class: 'sc-dot' }), barText, barPile, leaveBtn]);
+    if (!doc.getElementById('sc-stack-full-style')) {
+      const style = doc.createElement('style');
+      style.id = 'sc-stack-full-style';
+      style.textContent = `
+.sc-bar.is-stack-full {
+  animation: sc-stack-pulse 0.9s ease-in-out 2;
+  box-shadow: 0 0 0 2px rgba(240, 180, 41, 0.85);
+}
+.sc-bar.is-stack-full .sc-dot { background: #f0b429; }
+.sc-bar.is-stack-full .sc-bar-pile { color: #f0b429; font-weight: 600; }
+@keyframes sc-stack-pulse {
+  0%, 100% { filter: brightness(1); }
+  50% { filter: brightness(1.25); }
+}`;
+      doc.head.appendChild(style);
+    }
+    let stackFullTimer = null;
+    function flashStackFull() {
+      bar.classList.add('is-stack-full');
+      if (stackFullTimer) clearTimeout(stackFullTimer);
+      stackFullTimer = setTimeout(() => bar.classList.remove('is-stack-full'), 2800);
+      try {
+        if (navigator.vibrate) navigator.vibrate([40, 40, 40]);
+      } catch (_) {}
+    }
     const flash = el('div', { class: 'sc-flash', role: 'status', 'aria-live': 'polite', hidden: '' });
     const shutter = el('button', { type: 'button', class: 'sc-shutter', hidden: '', 'aria-label': 'Add the card in view' }, [el('span', { text: 'Add card' })]);
 
@@ -470,6 +495,8 @@
         const { status: code, data } = await request('/api/scan-phone?action=scan', { ...event, timings: { ...event.timings, attempt } }, state.token);
         if (code === 200) {
           sent = data.received || sent + (data.duplicate ? 0 : 1);
+          if (data.stackFull) flashStackFull();
+          if (data.defaultsLabel) barPile.textContent = data.defaultsLabel;
           return { ok: true };
         }
         if (code === 401) {
