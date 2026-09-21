@@ -444,6 +444,7 @@
           const tip = doc.getElementById('scOpenBrowser');
           if (tip) tip.remove();
           if (data.defaultsLabel) barPile.textContent = data.defaultsLabel;
+          if (data.scanCatalog) applyScanCatalog(data.scanCatalog);
           setTimeout(openScanner, 700);
           ok = true;
           return ok;
@@ -524,12 +525,21 @@
           const wasPaused = paused;
           paused = data.paused === true;
           barPile.textContent = data.defaultsLabel || '';
+          if (data.scanCatalog) applyScanCatalog(data.scanCatalog);
           barText.textContent = paused ? 'Paused on dashboard' : `Connected · ${data.received} sent`;
           bar.classList.toggle('paused', paused);
           if (wasPaused && !paused) outbox.resume();
         }
       } catch (_) {
         barText.textContent = 'Reconnecting…';
+      }
+    }
+
+    let phoneCatalog = { family: 'pokemon', variant: 'generic' };
+    function applyScanCatalog(info) {
+      if (info && info.family) phoneCatalog = { family: info.family, variant: info.variant || 'generic' };
+      if (typeof win.selectCatalog === 'function') {
+        win.selectCatalog(phoneCatalog.family, phoneCatalog.variant);
       }
     }
 
@@ -541,7 +551,7 @@
       heartbeat();
       heartbeatTimer = setInterval(heartbeat, HEARTBEAT_MS);
       outbox.resume();
-      if (typeof win.selectCatalog === 'function') win.selectCatalog('pokemon', 'generic');
+      applyScanCatalog(phoneCatalog);
       if (typeof win.setMode === 'function') win.setMode('single');
       if (typeof win.startCam === 'function' && !cameraStarted) {
         cameraStarted = true;
