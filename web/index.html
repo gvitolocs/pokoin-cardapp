@@ -308,6 +308,48 @@
       body.scan-connect .dock .camera-controls select { width: min(220px, 72vw); }
       .sc-shutter { min-width: 140px; height: 52px; font-size: 16px; }
     }
+    /* Printing choice: one artwork, 2+ printings in the batch language. Tiles sit in the
+       camera dock where the shutter was. Blue + focus are pokoin-web home/landing.css
+       --blue / --focus. */
+    :root { --pokoin-blue: #4452d8; --pokoin-focus: #4d65ff; }
+    body.scan-connect.sc-picking .dock { padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
+    .sc-pick { pointer-events: auto; display: flex; flex-direction: column; gap: 8px; padding: 0 2px; }
+    .sc-pick-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .sc-pick-title { min-width: 0; font-size: 15px; font-weight: 750; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7); }
+    .sc-pick-skip { flex: none; min-height: 36px; padding: 0 14px; border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 18px; background: rgba(5, 8, 22, 0.78); color: var(--text); font: inherit; font-size: 13px; font-weight: 650; }
+    /* 2–3 tiles centre; more scroll sideways at full size (the pseudo spacers collapse). */
+    .sc-pick-row { display: flex; gap: 10px; overflow-x: auto; overscroll-behavior-x: contain; scroll-snap-type: x proximity; padding: 4px 2px 2px; scrollbar-width: none; }
+    .sc-pick-row::-webkit-scrollbar { display: none; }
+    .sc-pick-row::before, .sc-pick-row::after { content: ""; flex: 1 0 0; }
+    /* Almost square (1.15 : 1), at most ~1/5 of the viewport height, never chip-sized. */
+    .sc-tile {
+      flex: none; height: clamp(72px, 17vh, 136px); width: calc(1.15 * clamp(72px, 17vh, 136px));
+      display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto auto;
+      justify-items: center; align-items: center; gap: 3px;
+      padding: 10px 8px 8px; border: 1px solid rgba(255, 255, 255, 0.24); border-radius: 16px;
+      background: var(--pokoin-blue); color: #fff; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+      scroll-snap-align: center; cursor: pointer; transition: transform 0.08s ease, background-color 0.12s ease;
+    }
+    .sc-tile:active { transform: scale(0.96); }
+    .sc-tile:focus-visible { outline: 3px solid #fff; outline-offset: 3px; box-shadow: 0 0 0 6px var(--pokoin-focus); }
+    .sc-tile.picked { background: var(--yellow); border-color: var(--yellow); color: #111; }
+    .sc-tile:disabled { cursor: default; }
+    .sc-tile:disabled:not(.picked) { opacity: 0.45; }
+    .sc-pick:focus { outline: none; }
+    .sc-tile-mark { width: 100%; height: 100%; min-height: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+    .sc-tile-mark img { width: 80%; height: 100%; object-fit: contain; filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.45)); }
+    .sc-tile-code { max-width: 100%; overflow: hidden; text-overflow: ellipsis; font-size: clamp(14px, 2.4vh, 21px); font-weight: 900; letter-spacing: 0.04em; }
+    .sc-tile-num { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: clamp(13px, 2vh, 17px); font-weight: 800; line-height: 1.1; font-variant-numeric: tabular-nums; }
+    .sc-tile-detail { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10.5px; line-height: 1.2; opacity: 0.85; }
+    @supports (height: 1dvh) {
+      .sc-tile { height: clamp(72px, 17dvh, 136px); width: calc(1.15 * clamp(72px, 17dvh, 136px)); }
+    }
+    @media (max-height: 500px) and (orientation: landscape) {
+      .sc-tile { height: clamp(60px, 20vh, 96px); width: calc(1.15 * clamp(60px, 20vh, 96px)); padding: 6px 6px 5px; }
+      .sc-pick { gap: 4px; }
+      .sc-pick-title { font-size: 13px; }
+      .sc-pick-skip { min-height: 30px; }
+    }
   </style>
 </head>
 <body>
@@ -545,11 +587,12 @@
       const url = new URL(identifyUrl(), location.href);
       url.searchParams.set("catalog", catalogId());
       url.searchParams.set("multi", mode === "multi" ? "1" : "0");
+      // Scan Connect keeps 8 hits: printings of one artwork tie and must all reach the dashboard.
       if (isLive) {
         url.searchParams.set("live", "1");
-        url.searchParams.set("top_k", mode === "multi" ? "8" : "3");
+        url.searchParams.set("top_k", mode === "multi" || scanConnect ? "8" : "3");
       } else {
-        url.searchParams.set("top_k", "5");
+        url.searchParams.set("top_k", scanConnect ? "8" : "5");
       }
       return url.toString();
     }

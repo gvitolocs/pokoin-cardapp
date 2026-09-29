@@ -17,6 +17,8 @@
   const CLEAR_FRAMES = 2;
   const SWAP_FRAMES = 2;
   const HEARTBEAT_MS = 3000;
+  // Past this the scan goes out unchosen (desk review) instead of waiting.
+  const PRINTINGS_TIMEOUT_MS = 2500;
   const STORE_KEY = 'pokoin.scanConnect.v1';
   const OUTBOX_KEY = 'pokoin.scanConnect.outbox.v1';
 
@@ -31,6 +33,20 @@
 
   function confident(summary) {
     return Boolean(summary.top) && summary.score >= MATCH_SCORE && summary.margin >= MATCH_MARGIN;
+  }
+
+  const nameKey = (hit) => String((hit && hit.name) || '').trim().toLowerCase();
+
+  /**
+   * The picture is settled even though printings tie: top ≥ 0.80 and every
+   * hit within the margin carries the top's name (HGSS vs Call of Legends
+   * energy). BattleScan's own `_immediate` accepts that frame. Only *when* to
+   * send is decided here; the server groups hits by artwork, never by name.
+   */
+  function settled(summary) {
+    if (!summary.top || summary.score < MATCH_SCORE || !nameKey(summary.top)) return false;
+    const rival = summary.hits.find((h) => nameKey(h) !== nameKey(summary.top));
+    return !rival || summary.score - (Number(rival.score) || 0) >= MATCH_MARGIN;
   }
 
   /**
@@ -65,7 +81,7 @@
         const t = now();
         const result = { data, summary, context };
         if (armed) {
-          if (confident(summary)) return emit(result);
+          if (confident(summary) || settled(summary)) return emit(result);
           if (!hasCard) {
             seenSince = null;
             best = null;
@@ -227,11 +243,16 @@
   /**
    * FIFO outbox, one request in flight. Events survive reloads (without the
    * photo) so a dropped connection never loses a physical scan.
+   *
+   * An event can be *held* while the seller picks its printing: it is already
+   * persisted (a reload sends it as-is, never loses it) but the pump stops in
+   * front of it until `release`, so order is kept and it is sent exactly once.
    */
   function createOutbox({ send, storage, onChange = () => {}, sleep = (ms) => new Promise((r) => setTimeout(r, ms)) }) {
     let queue = [];
     let running = false;
     let halted = false;
+    const held = new Set();
     try {
       queue = JSON.parse((storage && storage.getItem(OUTBOX_KEY)) || '[]');
     } catch (_) {
@@ -243,7 +264,7 @@
       } catch (_) {
         // storage full / private mode: in-memory queue still works
       }
-      onChange(queue.length);
+      onChange(queue.length - held.size);
     };
     async function pump() {
       if (running) return;
@@ -252,6 +273,7 @@
       try {
         while (queue.length && !halted) {
           const event = queue[0];
+          if (held.has(event.scanEventId)) break;
           let outcome;
           try {
             outcome = await send(event, attempt);
@@ -277,10 +299,20 @@
       }
     }
     return {
-      add(event) {
+      add(event, { hold = false } = {}) {
+        if (hold) held.add(event.scanEventId);
         queue.push(event);
         persist();
         pump();
+      },
+      /** Send a held event, optionally with fields added (the printing choice). Once only. */
+      release(scanEventId, patch) {
+        if (!held.delete(scanEventId)) return false;
+        const event = queue.find((e) => e.scanEventId === scanEventId);
+        if (event && patch) Object.assign(event, patch);
+        persist();
+        pump();
+        return true;
       },
       resume() {
         halted = false;
@@ -288,12 +320,67 @@
       },
       clear() {
         queue = [];
+        held.clear();
         persist();
       },
       get size() {
         return queue.length;
       },
     };
+  }
+
+  /**
+   * One pending printing choice at a time (pokoin-web docs/SCAN_CONNECT.md#printing-choice).
+   * Its event is already in the outbox, held. Every way out releases it exactly
+   * once: with the tapped printing, or without one (Skip, a different card,
+   * disconnect) so the dashboard reviews it. The offered printings are frozen
+   * when the tiles open; later camera frames never change them.
+   */
+  function createPrintingPick({ release }) {
+    let current = null;
+    return {
+      open(event, printings) {
+        const hits = (event.recognition && event.recognition.hits) || [];
+        current = {
+          event,
+          printings: printings.slice(),
+          ids: new Set([...hits.map((h) => String(h.public_id)), ...printings.map((p) => String(p.cardId))]),
+        };
+        return current;
+      },
+      /** The pending card back in view (or re-sent by the gate) keeps its tiles. */
+      sameCard(result) {
+        const top = result && result.summary && result.summary.top;
+        return Boolean(current && top && current.ids.has(String(top.public_id)));
+      },
+      /** A tile tap. Only the first tap of this card counts. */
+      choose(cardId) {
+        if (!current) return null;
+        const printing = current.printings.find((p) => String(p.cardId) === String(cardId));
+        if (!printing) return null;
+        const pick = current;
+        current = null;
+        release(pick.event.scanEventId, { printing: { cardId: String(printing.cardId) } });
+        return printing;
+      },
+      /** Send unchosen: the dashboard shows it for review with the same printings. */
+      cancel() {
+        if (!current) return false;
+        const pick = current;
+        current = null;
+        release(pick.event.scanEventId);
+        return true;
+      },
+      get active() {
+        return current;
+      },
+    };
+  }
+
+  /** Worth asking the server: only a confident top hit can be a confident artwork. */
+  function asksPrintings(event) {
+    const hits = (event && event.recognition && event.recognition.hits) || [];
+    return hits.length > 0 && Number(hits[0].score) >= MATCH_SCORE;
   }
 
   // ------------------------------------------------------------------ browser UI
@@ -376,6 +463,22 @@
     }
     const flash = el('div', { class: 'sc-flash', role: 'status', 'aria-live': 'polite', hidden: '' });
     const shutter = el('button', { type: 'button', class: 'sc-shutter', hidden: '', 'aria-label': 'Add the card in view' }, [el('span', { text: 'Add card' })]);
+
+    // Printing choice tiles, docked at the bottom of the camera frame.
+    const pickTitle = el('span', { class: 'sc-pick-title', id: 'scPickTitle', 'aria-live': 'polite' });
+    const pickSkip = el('button', {
+      type: 'button',
+      class: 'sc-pick-skip',
+      text: 'Skip',
+      'aria-label': 'Skip: choose the printing on the dashboard',
+    });
+    const pickRow = el('div', { class: 'sc-pick-row' });
+    const tray = el('div', { class: 'sc-pick', id: 'scPick', role: 'group', 'aria-labelledby': 'scPickTitle', tabindex: '-1', hidden: '' }, [
+      el('div', { class: 'sc-pick-head' }, [pickTitle, pickSkip]),
+      pickRow,
+    ]);
+    const picker = createPrintingPick({ release: (id, patch) => outbox.release(id, patch) });
+    let trayVersion = 0;
 
     function renderSlots() {
       slots.forEach((slot, i) => {
@@ -469,6 +572,8 @@
 
     function showKeypad(message) {
       clearInterval(heartbeatTimer);
+      picker.cancel();
+      closeTray();
       panel.hidden = false;
       panel.classList.remove('ok');
       bar.hidden = true;
@@ -584,21 +689,153 @@
       return '';
     }
 
-    function showFlash(result) {
-      const s = result.summary;
-      const ok = confident(s);
-      flash.textContent = ok ? `✓ ${s.top.name || 'Card'}` : s.top ? '? Check on dashboard' : '? Not identified — check on dashboard';
-      flash.className = `sc-flash ${ok ? 'ok' : 'check'}`;
-      flash.hidden = false;
-      clearTimeout(showFlash.t);
-      showFlash.t = setTimeout(() => {
-        flash.hidden = true;
-      }, 1100);
-      if (win.navigator && typeof win.navigator.vibrate === 'function') win.navigator.vibrate(ok ? 20 : [20, 60, 20]);
+    function vibrate(pattern) {
+      if (win.navigator && typeof win.navigator.vibrate === 'function') win.navigator.vibrate(pattern);
     }
 
-    async function send(result) {
-      showFlash(result);
+    function flashText(text, tone) {
+      flash.textContent = text;
+      flash.className = `sc-flash ${tone}`;
+      flash.hidden = false;
+      clearTimeout(flashText.t);
+      flashText.t = setTimeout(() => {
+        flash.hidden = true;
+      }, 1100);
+    }
+
+    /** `answer` (server printing check) wins over the phone's own margin rule. */
+    function showFlash(result, answer) {
+      const s = result.summary;
+      const ok = answer ? answer.state === 'matched' : confident(s);
+      const name = (answer && answer.name) || (s.top && s.top.name) || 'Card';
+      flashText(ok ? `✓ ${name}` : s.top ? '? Check on dashboard' : '? Not identified — check on dashboard', ok ? 'ok' : 'check');
+      vibrate(ok ? 20 : [20, 60, 20]);
+    }
+
+    function closeTray() {
+      trayVersion += 1;
+      tray.hidden = true;
+      pickRow.replaceChildren();
+      doc.body.classList.remove('sc-picking');
+      if (state.token && panel.hidden) shutter.hidden = false;
+    }
+
+    function tile(printing) {
+      const mark = el('span', { class: 'sc-tile-mark' });
+      // Expansion / program mark first; the catalog set code only when no image loads.
+      const showCode = () => mark.replaceChildren(el('span', { class: 'sc-tile-code', text: printing.setCode || printing.setName || '?' }));
+      const sources = [printing.symbolUrl, printing.symbolAltUrl].filter(Boolean);
+      if (sources.length) {
+        const img = el('img', { alt: '', src: sources.shift(), decoding: 'async', draggable: 'false' });
+        img.addEventListener('error', () => {
+          if (sources.length) img.src = sources.shift();
+          else showCode();
+        });
+        mark.append(img);
+      } else {
+        showCode();
+      }
+      const label = printing.label || [printing.setName, printing.number && `card ${printing.number}`].filter(Boolean).join(', ');
+      const button = el('button', { type: 'button', class: 'sc-tile', 'aria-label': label, title: label }, [mark]);
+      if (printing.number) button.append(el('span', { class: 'sc-tile-num', text: printing.number }));
+      if (printing.detail) button.append(el('span', { class: 'sc-tile-detail', text: printing.detail }));
+      button.addEventListener('click', () => pickPrinting(printing, button));
+      return button;
+    }
+
+    function openTray(event, answer) {
+      picker.open(event, answer.printings);
+      trayVersion += 1;
+      const name = String(answer.printings[0].name || '');
+      pickTitle.textContent = name ? `Which printing? · ${name}` : 'Which printing?';
+      pickRow.replaceChildren(...answer.printings.map(tile));
+      pickRow.scrollLeft = 0;
+      clearTimeout(flashText.t);
+      flash.hidden = true;
+      shutter.hidden = true;
+      tray.hidden = false;
+      doc.body.classList.add('sc-picking');
+      vibrate([15, 40, 15]);
+      // Focus the group, not a tile: a ringed first tile would read as a preselected printing.
+      tray.focus({ preventScroll: true });
+    }
+
+    function pickPrinting(printing, button) {
+      const chosen = picker.choose(printing.cardId);
+      if (!chosen) return; // a second tap on this card, or it was already sent
+      for (const b of pickRow.querySelectorAll('.sc-tile')) b.disabled = true;
+      button.classList.add('picked');
+      flashText(`✓ ${chosen.name || 'Card'} · ${[chosen.setCode || chosen.setName, chosen.number].filter(Boolean).join(' ')}`, 'ok');
+      vibrate(20);
+      const version = trayVersion;
+      setTimeout(() => {
+        if (version === trayVersion) closeTray();
+      }, 220);
+    }
+
+    function skipPrinting() {
+      if (!picker.cancel()) return;
+      closeTray();
+      flashText('? Check on dashboard', 'check');
+    }
+
+    pickSkip.addEventListener('click', skipPrinting);
+    tray.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        skipPrinting();
+        return;
+      }
+      if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return;
+      const tiles = Array.from(pickRow.querySelectorAll('.sc-tile:not([disabled])'));
+      if (!tiles.length) return;
+      const at = tiles.indexOf(doc.activeElement);
+      event.preventDefault();
+      const next = at < 0
+        ? tiles[event.key === 'ArrowRight' ? 0 : tiles.length - 1]
+        : tiles[(at + (event.key === 'ArrowRight' ? 1 : tiles.length - 1)) % tiles.length];
+      next.focus();
+      if (typeof next.scrollIntoView === 'function') next.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    });
+
+    /** Read-only server check: which printings of this artwork the batch language allows. */
+    async function askPrintings(event) {
+      if (!asksPrintings(event) || !state.token) return null;
+      let timer = 0;
+      try {
+        const res = await Promise.race([
+          request('/api/scan-phone?action=printings', {
+            recognition: event.recognition,
+            capturedAt: event.capturedAt,
+            clockOffsetMs: event.clockOffsetMs,
+          }, state.token),
+          new Promise((resolve) => {
+            timer = setTimeout(() => resolve(null), PRINTINGS_TIMEOUT_MS);
+          }),
+        ]);
+        return res && res.status === 200 && res.data ? res.data : null;
+      } catch (_) {
+        return null;
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+
+    // Gate emissions run one at a time so a printing question never interleaves.
+    let captures = Promise.resolve();
+    function send(result) {
+      captures = captures.then(() => capture(result)).catch(() => {});
+      return captures;
+    }
+
+    async function capture(result) {
+      if (picker.active) {
+        if (picker.sameCard(result)) return; // the pending card again: keep its tiles
+        picker.cancel(); // moved on without choosing: the dashboard reviews it
+        closeTray();
+      }
+      const quick = confident(result.summary);
+      if (quick) showFlash(result);
       sequence += 1;
       try {
         storage.setItem(`${STORE_KEY}.seq`, String(sequence));
@@ -619,10 +856,19 @@
       } catch (_) {
         // ignore
       }
-      const image = !confident(result.summary) && result.context && result.context.blob
+      const image = !quick && result.context && result.context.blob
         ? await thumbnail(result.context.blob, result.data)
         : '';
-      outbox.add(buildEvent(result, { sequence, clockOffsetMs: clock.offset, image }));
+      // Persisted now (a reload sends it as-is), sent once the printing is known.
+      const event = buildEvent(result, { sequence, clockOffsetMs: clock.offset, image });
+      outbox.add(event, { hold: true });
+      const answer = await askPrintings(event);
+      if (answer && answer.choose && Array.isArray(answer.printings) && answer.printings.length > 1 && state.token) {
+        openTray(event, answer);
+        return;
+      }
+      if (!quick) showFlash(result, answer);
+      outbox.release(event.scanEventId);
     }
 
     leaveBtn.addEventListener('click', async () => {
@@ -635,6 +881,8 @@
     });
 
     doc.body.append(panel, bar, flash, shutter);
+    // Inside the camera dock so it rides above the safe area and camera select.
+    (doc.querySelector('.dock') || doc.querySelector('.stage') || doc.body).append(tray);
 
     const api = {
       /** Called by index.html for every live identify response. */
@@ -739,7 +987,10 @@
     MATCH_MARGIN,
     topAndMargin,
     confident,
+    settled,
     createCaptureGate,
+    createPrintingPick,
+    asksPrintings,
     pairingFromLocation,
     connectUrlWithPair,
     chromeUrlFor,

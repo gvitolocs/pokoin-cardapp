@@ -171,6 +171,92 @@ test('outbox: FIFO, retries the same event on network loss, survives reload with
   assert.equal(reloaded.size, 1);
 });
 
+// ---- Printing choice: artwork settled, printing asked on the phone ----
+
+const named = (hits, boxes = 1) => ({
+  ...frame([], boxes),
+  hits: hits.map(([id, score, name]) => ({ public_id: id, score, name })),
+});
+
+test('printings of one artwork tie: the frame is settled and fires at once, not after 1.2 s', () => {
+  const gate = sc.createCaptureGate(clockAt());
+  // HGSS 115/123 vs Call of Legends 88/95 Grass Energy: 0.999 apart in the gallery.
+  const fired = gate.push(named([['242396', 0.95, 'Grass Energy'], ['224950', 0.949, 'Grass Energy'], ['279166', 0.935, 'Grass Energy']]));
+  assert.ok(fired);
+  assert.equal(sc.confident(fired.summary), false, 'still not a per-printing match: the server decides the printing');
+  // Two different cards within the margin keep the old hold.
+  const other = sc.createCaptureGate(clockAt());
+  assert.equal(other.push(named([['1', 0.9, 'Pikachu'], ['2', 0.87, 'Raichu']])), null);
+  assert.equal(sc.settled(sc.topAndMargin(named([['1', 0.79, 'Pikachu'], ['2', 0.79, 'Pikachu']]))), false, 'below 0.80 is never settled');
+  assert.equal(sc.settled(sc.topAndMargin(named([['1', 0.9, ''], ['2', 0.9, '']]))), false, 'nameless hits prove nothing');
+});
+
+test('outbox hold: persisted at once, sent only after release, exactly once, in order; a reload sends it unchosen', async () => {
+  const storage = memoryStorage();
+  const sent = [];
+  const outbox = sc.createOutbox({ storage, sleep: async () => {}, send: async (event) => { sent.push({ ...event }); return { ok: true }; } });
+  outbox.add({ scanEventId: 'a', recognition: { hits: [] } }, { hold: true });
+  outbox.add({ scanEventId: 'b' });
+  await new Promise((r) => setTimeout(r, 5));
+  assert.deepEqual(sent, [], 'b waits behind the held a');
+  assert.deepEqual(JSON.parse(storage.getItem('pokoin.scanConnect.outbox.v1')).map((e) => e.scanEventId), ['a', 'b']);
+
+  const crashed = sc.createOutbox({ storage, sleep: async () => {}, send: async (event) => { sent.push({ ...event, reloaded: true }); return { ok: true }; } });
+  assert.equal(crashed.size, 2, 'a reload after a crash still has the held scan');
+
+  assert.equal(outbox.release('a', { printing: { cardId: '224950' } }), true);
+  assert.equal(outbox.release('a', { printing: { cardId: '242396' } }), false, 'second release is a no-op');
+  await new Promise((r) => setTimeout(r, 5));
+  assert.deepEqual(sent.map((e) => e.scanEventId), ['a', 'b']);
+  assert.deepEqual(sent[0].printing, { cardId: '224950' });
+});
+
+const printings = [
+  { cardId: '224950', name: 'Grass Energy', setName: 'Call of Legends', setCode: 'CLO', number: '88/95' },
+  { cardId: '242396', name: 'Grass Energy', setName: 'HeartGold & SoulSilver', setCode: 'HGS', number: '115/123' },
+];
+const pendingEvent = () => ({
+  scanEventId: 'e1',
+  recognition: { hits: [{ public_id: '242396', score: 0.95 }, { public_id: '224950', score: 0.949 }, { public_id: '279166', score: 0.935 }] },
+});
+
+test('H. tiles are locked: later frames of the same card keep them; a different card releases it unchosen', () => {
+  const released = [];
+  const pick = sc.createPrintingPick({ release: (id, patch) => released.push([id, patch]) });
+  const offered = printings.slice();
+  pick.open(pendingEvent(), offered);
+  offered.reverse();
+  offered.push({ cardId: '999' });
+  assert.deepEqual(pick.active.printings.map((p) => p.cardId), ['224950', '242396'], 'frozen at open');
+  // Noisy frames of the same card: COL on top now, or the JP print, or the card came back into view.
+  for (const top of ['224950', '242396', '279166']) {
+    assert.equal(pick.sameCard({ summary: { top: { public_id: top } } }), true);
+  }
+  assert.deepEqual(released, []);
+  assert.equal(pick.sameCard({ summary: { top: { public_id: '220962' } } }), false);
+  assert.equal(pick.cancel(), true);
+  assert.deepEqual(released, [['e1', undefined]], 'sent without a choice: the dashboard reviews it');
+  assert.equal(pick.active, null);
+});
+
+test('I. rapid taps: one release with the first printing; later taps and Skip do nothing', () => {
+  const released = [];
+  const pick = sc.createPrintingPick({ release: (id, patch) => released.push([id, patch]) });
+  pick.open(pendingEvent(), printings);
+  assert.equal(pick.choose('999'), null, 'a printing that was not offered');
+  assert.equal(pick.choose('242396').setCode, 'HGS');
+  assert.equal(pick.choose('242396'), null);
+  assert.equal(pick.choose('224950'), null);
+  assert.equal(pick.cancel(), false);
+  assert.deepEqual(released, [['e1', { printing: { cardId: '242396' } }]]);
+});
+
+test('only a confident top hit asks the server for printings', () => {
+  assert.equal(sc.asksPrintings({ recognition: { hits: [{ public_id: '1', score: 0.8 }] } }), true);
+  assert.equal(sc.asksPrintings({ recognition: { hits: [{ public_id: '1', score: 0.79 }] } }), false);
+  assert.equal(sc.asksPrintings({ recognition: { hits: [] } }), false);
+});
+
 test('only /connect enables connect mode; / keeps the card-page redirect', () => {
   assert.equal(sc.isConnectPath({ pathname: '/connect' }), true);
   assert.equal(sc.isConnectPath({ pathname: '/connect/' }), true);
