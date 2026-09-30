@@ -398,6 +398,8 @@
     </div>
   </div>
 
+  <!-- Recognition runs on the Pi API (nezopt GPU, Pi CPU fallback): pokoin-web docs/SCAN_API.md. -->
+  <script data-scan-api>window.CARDSCAN_API = window.CARDSCAN_API || "https://api.pokoin.com/api/scan";</script>
   <script src="/static/scan-connect.js"></script>
   <script>
     const LIVE_MS = 280;
