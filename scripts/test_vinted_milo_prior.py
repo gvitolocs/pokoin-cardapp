@@ -9,9 +9,9 @@ from pathlib import Path
 
 from PIL import Image, ImageOps
 
-ROOT = Path("/home/nez/Projects/BattleScan")
-SCRIPTS = Path("/home/nez/Projects/pokoin/PokoinTest/scripts")
-INDEX = Path("/home/nez/Projects/pokoin/PokoinTest/index/blueprint_clip")
+ROOT = Path("/home/nez/Projects/Startup/Pokoin/BattleScan")
+SCRIPTS = Path("/home/nez/Projects/Startup/Pokoin/PokoinTest/scripts")
+INDEX = Path("/home/nez/Projects/Startup/Pokoin/PokoinTest/index/blueprint_clip")
 KEEP = ROOT / "results/vinted-keepers.json"
 BOXES = ROOT / "results/yolo-boxes-vinted.json"
 MANIFEST = ROOT / "images/vinted/manifest.json"

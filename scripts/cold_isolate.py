@@ -9,7 +9,7 @@ from pathlib import Path
 
 import cv2
 
-ROOT = Path("/home/nez/Projects/BattleScan")
+ROOT = Path("/home/nez/Projects/Startup/Pokoin/BattleScan")
 PHOTO = ROOT / "images/01-pikachu-sm86-slab.png"
 which = sys.argv[1]
 

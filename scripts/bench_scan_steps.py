@@ -22,7 +22,7 @@ import cv2
 import numpy as np
 from PIL import Image
 
-ROOT = Path("/home/nez/Projects/BattleScan")
+ROOT = Path("/home/nez/Projects/Startup/Pokoin/BattleScan")
 PHOTOS = ROOT / "images"
 TCG_WEIGHTS = ROOT / "clones/TCG/backend/models/card_detector.pt"
 WARMUP = 1
@@ -71,7 +71,7 @@ def time_fn(fn, n: int) -> list[float]:
 
 def main() -> None:
     sys.path.insert(0, str(ROOT / "clones/CollectorVision"))
-    sys.path.insert(0, "/home/nez/Projects/pokoin/PokoinTest")
+    sys.path.insert(0, "/home/nez/Projects/Startup/Pokoin/PokoinTest")
     from ultralytics import YOLO
     import collector_vision as cvg
     from pipeline import detect_card_quad
