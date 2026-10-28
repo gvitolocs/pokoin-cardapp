@@ -62,20 +62,47 @@ MILO_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
 MILO_STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
 MAX_BYTES = 4 * 1024 * 1024
 ORT_THREADS = int(os.environ.get("CARDSCAN_THREADS", "4"))
+# Detector backend: "pt" (ultralytics + PyTorch, the old path) or "onnx" (the same YOLO11n
+# exported with NMS, run in ONNX Runtime like Milo). Measured 2026-10-28 on 30 real photos:
+# same top box 29/30 (IoU > 0.9), detect mean 499 -> 39 ms, p90 295 -> 65 ms; PyTorch's
+# default 6 intra-op threads next to ORT's 4 oversubscribe the CPU and make the tail.
+DETECTOR = os.environ.get("CARDSCAN_DETECTOR", "pt").strip().lower()
+YOLO_ONNX = Path(
+    os.environ.get(
+        "YOLO_ONNX",
+        str(BATTLESCAN_ROOT / "clones/TCG/backend/models/card_detector.onnx"),
+    )
+)
+# PyTorch intra-op threads for the "pt" detector (0 = PyTorch's default).
+TORCH_THREADS = int(os.environ.get("CARDSCAN_TORCH_THREADS", "0"))
+# JPEG: decode at a reduced DCT scale when the photo is far larger than 1600 px.
+JPEG_DRAFT = os.environ.get("CARDSCAN_JPEG_DRAFT", "0") == "1"
 
 _lock = threading.Lock()
 _yolo = None
+_det = None
 _milo = None
 _vecs: np.ndarray | None = None
 _cards: list[dict] = []
 
 
 def _load() -> None:
-    global _yolo, _milo, _vecs, _cards
-    from ultralytics import YOLO
+    global _yolo, _det, _milo, _vecs, _cards
     import onnxruntime as ort
 
-    _yolo = YOLO(str(YOLO_PT))
+    if DETECTOR == "onnx":
+        dopts = ort.SessionOptions()
+        dopts.intra_op_num_threads = ORT_THREADS
+        dopts.inter_op_num_threads = 1
+        _det = ort.InferenceSession(str(YOLO_ONNX), dopts, providers=["CPUExecutionProvider"])
+    else:
+        from ultralytics import YOLO
+
+        if TORCH_THREADS > 0:
+            import torch
+
+            torch.set_num_threads(TORCH_THREADS)
+        _yolo = YOLO(str(YOLO_PT))
     opts = ort.SessionOptions()
     opts.intra_op_num_threads = ORT_THREADS
     opts.inter_op_num_threads = 1
@@ -112,7 +139,37 @@ def _load() -> None:
     _cards = recs
 
 
+def _detect_onnx(rgb: np.ndarray) -> list[dict]:
+    """YOLO11n with built-in NMS: letterbox to 640 (pad 114), boxes back to image pixels."""
+    h, w = rgb.shape[:2]
+    r = 640 / max(h, w)
+    nh, nw = max(1, int(round(h * r))), max(1, int(round(w * r)))
+    canvas = np.full((640, 640, 3), 114, np.uint8)
+    top, left = (640 - nh) // 2, (640 - nw) // 2
+    canvas[top : top + nh, left : left + nw] = np.asarray(
+        Image.fromarray(rgb).resize((nw, nh), Image.BILINEAR)
+    )
+    x = canvas.transpose(2, 0, 1)[None].astype(np.float32) / 255.0
+    out = _det.run(None, {_det.get_inputs()[0].name: x})[0][0]
+    min_area = MIN_AREA * w * h
+    raw = []
+    for x1, y1, x2, y2, conf, _cls in out[out[:, 4] >= YOLO_CONF]:
+        bx = (
+            min(max((x1 - left) / r, 0.0), w),
+            min(max((y1 - top) / r, 0.0), h),
+            min(max((x2 - left) / r, 0.0), w),
+            min(max((y2 - top) / r, 0.0), h),
+        )
+        if (bx[2] - bx[0]) * (bx[3] - bx[1]) < min_area:
+            continue
+        raw.append({"xyxy": [round(float(v), 1) for v in bx], "conf": round(float(conf), 4)})
+    raw.sort(key=lambda b: b["conf"], reverse=True)
+    return raw
+
+
 def _detect(rgb: np.ndarray) -> list[dict]:
+    if _det is not None:
+        return _detect_onnx(rgb)
     h, w = rgb.shape[:2]
     bgr = rgb[:, :, ::-1].copy()
     result = _yolo.predict(
@@ -262,7 +319,7 @@ def health():
         "host": "nezopt",
         "n": 0 if _vecs is None else int(_vecs.shape[0]),
         "identity": "ct_id",
-        "detect": "yolo-pt-cpu",
+        "detect": "yolo-onnx-cpu" if _det is not None else "yolo-pt-cpu",
         "identify": "cdn-milo-128",
         "orient": "90-270",
         "index": "cdn_milo",
@@ -282,7 +339,10 @@ async def identify(
     if not blob or len(blob) > MAX_BYTES:
         raise HTTPException(400, f"image must be 1–{MAX_BYTES} bytes")
     try:
-        im = Image.open(BytesIO(blob)).convert("RGB")
+        im = Image.open(BytesIO(blob))
+        if JPEG_DRAFT and im.format == "JPEG":
+            im.draft("RGB", (1600, 1600))
+        im = im.convert("RGB")
     except Exception as exc:
         raise HTTPException(400, "could not decode image") from exc
     w, h = im.size
