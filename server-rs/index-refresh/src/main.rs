@@ -120,7 +120,7 @@ fn load_catalogs(root: &Path, meta: &mut BTreeMap<u64, CardMeta>) -> Res<BTreeMa
         let rows = cards["rows"].as_array().ok_or("cards without rows")?;
         for row in rows {
             let public: u64 = str_of(&row[c_id]).and_then(|s| s.parse().ok()).ok_or(format!("{id}: bad id"))?;
-            if public % 2 != 0 {
+            if !public.is_multiple_of(2) {
                 return Err(format!("{id}: public id {public} is odd"));
             }
             let entry = meta.entry(public / 2).or_insert_with(|| CardMeta {

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["index-refresh", "scan-compare"]
+members = ["index-refresh", "scan-compare", "cardscan-core", "cardscan-worker"]
 
 [profile.release]
 lto = "thin"
