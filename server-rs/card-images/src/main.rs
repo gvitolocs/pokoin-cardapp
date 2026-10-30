@@ -8,6 +8,7 @@ use std::fs;
 use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 use std::path::{Component, Path, PathBuf};
 
+mod catalog_purge;
 mod recover;
 #[cfg(test)]
 mod tests;
@@ -31,7 +32,8 @@ fn main() {
         match args.first().map(String::as_str) {
             Some("audit") => audit(&flags),
             Some("recover") => recover::run(&flags),
-            _ => Err("usage: card-images audit --objects DIR --out FILE [--threads N]\n       card-images recover --audit FILE --objects DIR --blueprints DIR --expansions FILE --tcgdex DIR --pokemontcg DIR --scryfall FILE --out DIR [--download] [--apply --backup DIR]".into()),
+            Some("catalog-purge") => catalog_purge::run(&flags),
+            _ => Err("usage: card-images catalog-purge --catalogs DIR --audit FILE --out DIR [--cos 0.995] [--only id,id,...]\n       card-images audit --objects DIR --out FILE [--threads N]\n       card-images recover --audit FILE --objects DIR --blueprints DIR --expansions FILE --tcgdex DIR --pokemontcg DIR --scryfall FILE --out DIR [--download] [--apply --backup DIR]".into()),
         }
     })();
     if let Err(e) = result {

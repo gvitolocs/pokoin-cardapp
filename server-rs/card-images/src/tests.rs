@@ -373,3 +373,177 @@ fn apply_requires_backup_and_keys_are_relative() {
         .contains("separate"));
     assert!(!f.temp.join("objects/output").exists());
 }
+
+
+#[test]
+fn catalog_purge_export() {
+    let t = Temp::new();
+    let source = t.join("revision");
+    let out = t.join("export");
+    let audit = t.join("audit.jsonl");
+    put(&audit, b"{\"key\":\"missing.webp\"}\n");
+    let cards = json!({"fields": ["id", "image", "name", "number", "set"], "rows": [
+        ["face", "https://cdn.pokoin.com/missing.webp", "Missing", "1", "S"],
+        ["near", "https://cdn.pokoin.com/near.webp", "Near", "2", "S"],
+        ["real", "https://cdn.pokoin.com/real.webp", "Real", "3", "S"]], "extra": {"z": 1, "a": 2}});
+    // Non-unit vectors ensure cosine uses both norms. Near is close, not identical.
+    let bytes: Vec<u8> = [0x4000u16, 0, 0x3c00, 0x211f, 0, 0xbc00]
+        .into_iter()
+        .flat_map(u16::to_le_bytes)
+        .collect();
+    let untouched = json!({"fields": ["id", "image"], "rows": [["other", "https://cdn.pokoin.com/other.webp"]]});
+    let mut catalogs = Vec::new();
+    for (id, data, embedding, count) in [
+        ("changed", &cards, bytes.as_slice(), 3),
+        ("untouched", &untouched, &bytes[8..], 1),
+    ] {
+        let c = format!(
+            "{id}/cards-{}.json",
+            &hash(&serde_json::to_vec(data).unwrap())[..12]
+        );
+        let e = format!("{id}/embeddings-{}.f16", &hash(embedding)[..12]);
+        put(&source.join(&c), &serde_json::to_vec(data).unwrap());
+        put(&source.join(&e), embedding);
+        catalogs.push(json!({"id": id, "count": count, "cards": {"path": c, "bytes": 1, "sha256": "old", "extra": true}, "embeddings": {"path": e, "bytes": embedding.len(), "sha256": hash(embedding)}, "legacy": true}));
+    }
+    let mut index: Value =
+        serde_json::from_str(r#"{"z":{"b":1,"a":2},"catalogs":[],"a":"keep"}"#).unwrap();
+    index["catalogs"] = catalogs.clone().into();
+    put(
+        &source.join("index.json"),
+        &serde_json::to_vec(&index).unwrap(),
+    );
+    put(&source.join("packs/nested/file"), b"preserved");
+    let source_index = fs::read(source.join("index.json")).unwrap();
+    #[cfg(unix)]
+    let input = {
+        let link = t.join("current");
+        std::os::unix::fs::symlink(&source, &link).unwrap();
+        link
+    };
+    #[cfg(not(unix))]
+    let input = source.clone();
+    let args = flags(&[
+        ("catalogs", input),
+        ("audit", audit.clone()),
+        ("out", out.clone()),
+    ]);
+    catalog_purge::run(&args).unwrap();
+    assert!(catalog_purge::run(&args)
+        .unwrap_err()
+        .to_string()
+        .contains("must not exist"));
+    let result = read_json(&out.join("index.json")).unwrap();
+    assert_eq!(
+        result.as_object().unwrap().keys().collect::<Vec<_>>(),
+        ["z", "catalogs", "a", "placeholderPurgeExport"]
+    );
+    assert_eq!(result["z"], index["z"]);
+    assert_eq!(result["a"], index["a"]);
+    assert_eq!(result["catalogs"][1], catalogs[1]);
+    let changed = &result["catalogs"][0];
+    assert_eq!(changed["count"], 1);
+    assert_eq!(changed["legacy"], true);
+    assert_eq!(changed["cards"]["extra"], true);
+    for kind in ["cards", "embeddings"] {
+        let p = changed[kind]["path"].as_str().unwrap();
+        let data = fs::read(out.join(p)).unwrap();
+        let sha = hash(&data);
+        assert!(p.contains(&sha[..12]));
+        assert_eq!(changed[kind]["sha256"], sha);
+        assert_eq!(changed[kind]["bytes"], data.len());
+        assert!(!out
+            .join(catalogs[0][kind]["path"].as_str().unwrap())
+            .exists());
+    }
+    let kept = read_json(&out.join(changed["cards"]["path"].as_str().unwrap())).unwrap();
+    assert_eq!(kept["rows"], json!([cards["rows"][2]]));
+    assert_eq!(kept["fields"], cards["fields"]);
+    assert_eq!(kept["extra"], cards["extra"]);
+    assert_eq!(
+        fs::read(out.join(changed["embeddings"]["path"].as_str().unwrap())).unwrap(),
+        bytes[8..]
+    );
+    assert_eq!(fs::read(source.join("index.json")).unwrap(), source_index);
+    let export = &result["placeholderPurgeExport"];
+    assert_eq!(export["removed"]["changed"], json!(["face", "near"]));
+    assert_eq!(export["auditSha256"], hash(&fs::read(audit).unwrap()));
+    assert_eq!(export["sourceRevision"], "revision");
+    let report = read_json(&out.join("placeholder-purge-report.json")).unwrap();
+    assert_eq!(
+        report[0]["removedByReason"],
+        json!({"face":1,"embedding":1})
+    );
+    assert_eq!(
+        report[0]["removed"][1],
+        json!({"id":"near","name":"Near","number":"2","set":"S","image":"https://cdn.pokoin.com/near.webp","reason":"embedding"})
+    );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        for p in [
+            catalogs[1]["cards"]["path"].as_str().unwrap(),
+            catalogs[1]["embeddings"]["path"].as_str().unwrap(),
+            "packs/nested/file",
+        ] {
+            assert_eq!(
+                fs::metadata(source.join(p)).unwrap().ino(),
+                fs::metadata(out.join(p)).unwrap().ino()
+            );
+        }
+    }
+    let only_out = t.join("only-export");
+    let only_args = flags(&[
+        ("catalogs", source.clone()),
+        ("audit", t.join("audit.jsonl")),
+        ("out", only_out.clone()),
+        ("only", "untouched".into()),
+    ]);
+    catalog_purge::run(&only_args).unwrap();
+    assert_eq!(
+        read_json(&only_out.join("index.json")).unwrap()["catalogs"],
+        index["catalogs"]
+    );
+    let empty_out = t.join("empty-export");
+    catalog_purge::run(&flags(&[
+        ("catalogs", source.clone()),
+        ("audit", t.join("audit.jsonl")),
+        ("out", empty_out.clone()),
+        ("cos", "-1".into()),
+    ]))
+    .unwrap();
+    let empty_index = read_json(&empty_out.join("index.json")).unwrap();
+    assert_eq!(empty_index["catalogs"][0]["count"], 0);
+    assert!(fs::read(
+        empty_out.join(
+            empty_index["catalogs"][0]["embeddings"]["path"]
+                .as_str()
+                .unwrap()
+        )
+    )
+    .unwrap()
+    .is_empty());
+    catalog_purge::run(&flags(&[
+        ("catalogs", empty_out),
+        ("audit", t.join("audit.jsonl")),
+        ("out", t.join("empty-again")),
+    ]))
+    .unwrap();
+
+    let invalid = flags(&[
+        ("catalogs", source.clone()),
+        ("audit", t.join("audit.jsonl")),
+        ("out", source.join("bad")),
+    ]);
+    assert!(catalog_purge::run(&invalid).is_err());
+    assert!(!source.join("bad").exists());
+}
+
+#[test]
+fn catalog_half_conversion() {
+    assert_eq!(catalog_purge::f16(1), 2.0f32.powi(-24));
+    assert_eq!(catalog_purge::f16(0x3c00), 1.0);
+    assert_eq!(catalog_purge::f16(0xbc00), -1.0);
+    assert_eq!(catalog_purge::f16(0x7c00), f32::INFINITY);
+    assert!(catalog_purge::f16(0x7e00).is_nan());
+}
