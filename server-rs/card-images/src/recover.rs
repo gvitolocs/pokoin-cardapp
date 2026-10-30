@@ -104,8 +104,12 @@ fn number_match(a: &str, b: &str) -> bool {
         .iter()
         .any(|n| b.iter().any(|v| n.eq_ignore_ascii_case(v)))
 }
+/// CardTrader puts the stamp in `version` (`Non-Holo Promo | BW95 | Finalist`) or a `(...)` name suffix. The bare
+/// name is not checked, so the unstamped `Champions Festival` SM148 still matches the reference datasets.
 pub(super) fn stamped(name: &str, version: &str) -> bool {
-    let s = format!("{name} {version}").to_lowercase();
+    let name = name.trim();
+    let suffix = name.strip_suffix(')').and_then(|n| n.rfind('(').map(|i| &n[i..])).unwrap_or_default();
+    let s = format!("{suffix} {version}").to_lowercase();
     [
         "finalist",
         "semi-finalist",

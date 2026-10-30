@@ -79,6 +79,9 @@ fn normalisation() {
         assert!(recover::stamped("Numel", stamp));
     }
     assert!(!recover::stamped("Numel", "Full Art"));
+    assert!(!recover::stamped("Champions Festival", "Holo Promo | SM148"));
+    assert!(recover::stamped("Champions Festival", "Non-Holo Promo | BW95 | Finalist"));
+    assert!(recover::stamped("Pikachu (Staff)", ""));
     for (a, b) in [
         ("me1", "me01"),
         ("me3", "me03"),
