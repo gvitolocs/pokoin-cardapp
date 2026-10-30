@@ -20,9 +20,8 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
 mod npy;
-mod placeholder;
 
-use placeholder::{Detector, Verdict};
+use card_placeholder::{Detector, Verdict};
 
 const POKEMON_GAME: u64 = 5;
 const SINGLES_CATEGORY: u64 = 73;
