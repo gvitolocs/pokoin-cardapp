@@ -1,7 +1,7 @@
 //! Immutable, hard-linked catalog exports with audited placeholder rows removed.
 use super::*;
 
-fn string<'a>(v: &'a Value, key: &str) -> Res<&'a str> {
+pub(super) fn string<'a>(v: &'a Value, key: &str) -> Res<&'a str> {
     v[key]
         .as_str()
         .ok_or_else(|| format!("missing string {key}").into())
@@ -20,7 +20,7 @@ pub(super) fn f16(bits: u16) -> f32 {
     }
 }
 
-fn vector(bytes: &[u8]) -> Vec<f32> {
+pub(super) fn vector(bytes: &[u8]) -> Vec<f32> {
     bytes
         .as_chunks::<2>()
         .0
@@ -28,11 +28,16 @@ fn vector(bytes: &[u8]) -> Vec<f32> {
         .map(|b| f16(u16::from_le_bytes([b[0], b[1]])))
         .collect()
 }
-fn norm(v: &[f32]) -> f32 {
+pub(super) fn norm(v: &[f32]) -> f32 {
     v.iter().map(|x| x * x).sum::<f32>().sqrt()
 }
 
-fn clone_tree(source: &Path, out: &Path, root: &Path, skip: &HashSet<PathBuf>) -> Res<()> {
+pub(super) fn clone_tree(
+    source: &Path,
+    out: &Path,
+    root: &Path,
+    skip: &HashSet<PathBuf>,
+) -> Res<()> {
     for entry in fs::read_dir(source)? {
         let entry = entry?;
         let path = entry.path();
@@ -61,7 +66,7 @@ fn clone_tree(source: &Path, out: &Path, root: &Path, skip: &HashSet<PathBuf>) -
     Ok(())
 }
 
-fn artifact(out: &Path, old: &str, kind: &str, ext: &str, bytes: &[u8]) -> Res<Value> {
+pub(super) fn artifact(out: &Path, old: &str, kind: &str, ext: &str, bytes: &[u8]) -> Res<Value> {
     let sha = hash(bytes);
     let path = safe_key(old)?.with_file_name(format!("{kind}-{}.{ext}", &sha[..12]));
     let dest = out.join(&path);

@@ -86,7 +86,11 @@ fn normalisation() {
         "Holo Promo | SM148",
         "126934_champions-festival-holo-promo-sm148-sm-black-star-promos.png"
     ));
-    assert!(recover::stamped("Champions Festival", "Non-Holo Promo | BW95 | Finalist", ""));
+    assert!(recover::stamped(
+        "Champions Festival",
+        "Non-Holo Promo | BW95 | Finalist",
+        ""
+    ));
     assert!(recover::stamped("Pikachu (Staff)", "", ""));
     // CardTrader left the stamp out of `version`; only the key slug says it.
     assert!(recover::stamped(
@@ -94,15 +98,29 @@ fn normalisation() {
         "Non-Holo Promo | 26",
         "124009_tropical-wind-semi-finalist-non-holo-promo-26-nintendo-black-star-promos.jpg"
     ));
-    assert!(!recover::stamped("Spinning Top", "Common", "1_spinning-top-common.jpg"));
-    assert!(!recover::stamped("Pokémon League Pass", "", "2_pokemon-league-pass.jpg"));
+    assert!(!recover::stamped(
+        "Spinning Top",
+        "Common",
+        "1_spinning-top-common.jpg"
+    ));
+    assert!(!recover::stamped(
+        "Pokémon League Pass",
+        "",
+        "2_pokemon-league-pass.jpg"
+    ));
     let bp = serde_json::json!({
         "image_url": "https://cardtrader.com/uploads/blueprints/image/7/preview_onix.webp",
         "image": {"url": "/uploads/blueprints/image/7/onix.webp"}
     });
-    assert_eq!(recover::full_image_url(&bp), "https://www.cardtrader.com/uploads/blueprints/image/7/onix.webp");
+    assert_eq!(
+        recover::full_image_url(&bp),
+        "https://www.cardtrader.com/uploads/blueprints/image/7/onix.webp"
+    );
     let fallback = serde_json::json!({"image_url": "https://cardtrader.com/x/preview_a.jpg", "image": {"url": null}});
-    assert_eq!(recover::full_image_url(&fallback), "https://cardtrader.com/x/preview_a.jpg");
+    assert_eq!(
+        recover::full_image_url(&fallback),
+        "https://cardtrader.com/x/preview_a.jpg"
+    );
     for (a, b) in [
         ("me1", "me01"),
         ("me3", "me03"),
@@ -395,7 +413,6 @@ fn apply_requires_backup_and_keys_are_relative() {
     assert!(!f.temp.join("objects/output").exists());
 }
 
-
 #[test]
 fn catalog_purge_export() {
     let t = Temp::new();
@@ -567,4 +584,203 @@ fn catalog_half_conversion() {
     assert_eq!(catalog_purge::f16(0xbc00), -1.0);
     assert_eq!(catalog_purge::f16(0x7c00), f32::INFINITY);
     assert!(catalog_purge::f16(0x7e00).is_nan());
+}
+
+#[test]
+fn incremental_audit_rechecks_changed_and_carries_placeholders() {
+    let t = Temp::new();
+    let root = t.join("objects");
+    let placeholder = sample("placeholder-cardtrader.png");
+    for id in 1..=4 {
+        put(&root.join(format!("{id}_face.png")), &placeholder);
+    }
+    put(&root.join("5_real.jpg"), &sample("real-370861_numel.jpg"));
+    let previous = t.join("previous.jsonl");
+    audit(&flags(&[
+        ("objects", root.clone()),
+        ("out", previous.clone()),
+    ]))
+    .unwrap();
+    let cutoff = fs::metadata(&previous).unwrap().modified().unwrap();
+    let later = cutoff + std::time::Duration::from_secs(2);
+    // Recovered, touched, deleted and new files; use deterministic mtimes without sleeps.
+    put(&root.join("1_face.png"), &sample("real-370861_numel.jpg"));
+    for name in ["1_face.png", "2_face.png"] {
+        fs::File::options()
+            .write(true)
+            .open(root.join(name))
+            .unwrap()
+            .set_modified(later)
+            .unwrap();
+    }
+    fs::remove_file(root.join("4_face.png")).unwrap();
+    put(&root.join("6_new.png"), &placeholder);
+    fs::File::options()
+        .write(true)
+        .open(root.join("6_new.png"))
+        .unwrap()
+        .set_modified(later)
+        .unwrap();
+    let out = t.join("incremental.jsonl");
+    audit(&flags(&[
+        ("objects", root),
+        ("out", out.clone()),
+        ("previous", previous.clone()),
+    ]))
+    .unwrap();
+    let rows = output_rows(&out);
+    assert_eq!(rows.len(), 3);
+    assert!(!rows
+        .iter()
+        .any(|r| r["key"] == "1_face.png" || r["key"] == "4_face.png"));
+    assert_eq!(
+        rows.iter().find(|r| r["key"] == "3_face.png"),
+        output_rows(&previous)
+            .iter()
+            .find(|r| r["key"] == "3_face.png")
+    );
+    let report = read_json(&t.join("incremental.jsonl.report.json")).unwrap();
+    assert_eq!(report["examined"], 3);
+    assert_eq!(report["carried_over"], 1);
+}
+
+#[test]
+fn catalog_mark_roundtrip_and_pinned_hardlinks() {
+    let t = Temp::new();
+    let source = t.join("source");
+    let audit = t.join("audit");
+    put(&audit, b"{\"key\":\"missing.jpg\"}\n");
+    let fields = json!(["name", "id", "image", "number", "set", "extra"]);
+    let cards = json!({"fields":fields,"rows":[["Missing","2","https://cdn.pokoin.com/missing.jpg",null,null,null],["Near","4","https://cdn.pokoin.com/near.jpg",null,null,"keep"],["Real","6","https://cdn.pokoin.com/real.jpg",null,null,null],["Zero","8","",null,null,null]]});
+    let mut bytes = vec![0u8; 4 * 256];
+    for (i, d) in [(0, 0), (1, 0), (2, 1)] {
+        bytes[i * 256 + d * 2..i * 256 + d * 2 + 2].copy_from_slice(&0x3c00u16.to_le_bytes());
+    }
+    let mut cats = Vec::new();
+    for id in ["pokemon_western", "pokemon_artwork"] {
+        put(
+            &source.join(format!("{id}/cards.json")),
+            &serde_json::to_vec(&cards).unwrap(),
+        );
+        put(&source.join(format!("{id}/vectors.f16")), &bytes);
+        cats.push(json!({"id":id,"count":4,"cards":{"path":format!("{id}/cards.json"),"sha256":if id=="pokemon_artwork" {"pinned"} else {"editable"}},"embeddings":{"path":format!("{id}/vectors.f16")},"keep":true}));
+    }
+    put(
+        &source.join("packs/a/manifest-v1.json"),
+        b"{\"nested\":{\"catalog_sha256\":\"pinned\"}}",
+    );
+    put(
+        &source.join("index.json"),
+        &serde_json::to_vec(&json!({"z":1,"catalogs":cats,"a":2})).unwrap(),
+    );
+    let marked = t.join("marked");
+    catalog_mark::run(&flags(&[
+        ("catalogs", source.clone()),
+        ("audit", audit.clone()),
+        ("out", marked.clone()),
+    ]))
+    .unwrap();
+    let index = read_json(&marked.join("index.json")).unwrap();
+    assert_eq!(
+        index["catalogs"][0]["noImagePublicIDs"],
+        json!(["2", "4", "8"])
+    );
+    assert_eq!(index["catalogs"][1], cats[1]);
+    assert_eq!(
+        index["placeholderMarkExport"]["catalogs"]["pokemon_artwork"]["pinned"],
+        true
+    );
+    assert_eq!(
+        index.as_object().unwrap().keys().collect::<Vec<_>>(),
+        ["z", "catalogs", "a", "placeholderMarkExport"]
+    );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        assert_eq!(
+            fs::metadata(source.join("pokemon_artwork/vectors.f16"))
+                .unwrap()
+                .ino(),
+            fs::metadata(marked.join("pokemon_artwork/vectors.f16"))
+                .unwrap()
+                .ino()
+        );
+    }
+    let mut vector = vec![0.0; 128];
+    vector[2] = 1.0;
+    let updates = t.join("updates");
+    put(&updates,format!("{}\n{}\n{}\n",json!({"catalog":"pokemon_western","id":"2","vector":vector}),json!({"catalog":"pokemon_western","id":"10","vector":null,"append":{"id":"10","name":"New","number":"5","set":"S","image":""}}),json!({"catalog":"pokemon_western","id":"12","vector":vector,"append":{"id":"12","name":"Real","number":"6","set":"S","image":"https://cdn.pokoin.com/new.jpg"}})).as_bytes());
+    // Real recovery no longer belongs to the audit.
+    put(&audit, b"");
+    let out = t.join("recovered");
+    catalog_mark::run(&flags(&[
+        ("catalogs", marked),
+        ("audit", audit.clone()),
+        ("out", out.clone()),
+        ("embeddings", updates.clone()),
+    ]))
+    .unwrap();
+    let index = read_json(&out.join("index.json")).unwrap();
+    let cat = &index["catalogs"][0];
+    assert_eq!(cat["count"], 6);
+    assert_eq!(cat["noImagePublicIDs"], json!(["10", "4", "8"]));
+    let result = read_json(&out.join(cat["cards"]["path"].as_str().unwrap())).unwrap();
+    assert_eq!(result["fields"], fields);
+    assert_eq!(result["rows"][4], json!(["New", "10", "", "5", "S", null]));
+    let vectors = fs::read(out.join(cat["embeddings"]["path"].as_str().unwrap())).unwrap();
+    assert_eq!(&vectors[4..6], &0x3c00u16.to_le_bytes());
+    let again = t.join("again");
+    catalog_mark::run(&flags(&[
+        ("catalogs", out),
+        ("audit", audit),
+        ("out", again.clone()),
+        ("embeddings", updates),
+    ]))
+    .unwrap();
+    assert_eq!(
+        read_json(&again.join("index.json")).unwrap()["catalogs"][0]["count"],
+        6
+    );
+    assert_eq!(
+        fs::read(source.join("pokemon_western/vectors.f16")).unwrap(),
+        bytes
+    );
+}
+
+#[test]
+fn incremental_shared_bytes_include_carried_placeholders() {
+    let t = Temp::new();
+    let root = t.join("objects");
+    let placeholder = sample("placeholder-cardtrader.png");
+    for id in 1..=3 {
+        put(&root.join(format!("magic/{id}_face.png")), &placeholder);
+    }
+    let previous = t.join("previous.jsonl");
+    audit(&flags(&[
+        ("objects", root.clone()),
+        ("out", previous.clone()),
+    ]))
+    .unwrap();
+    let later =
+        fs::metadata(&previous).unwrap().modified().unwrap() + std::time::Duration::from_secs(2);
+    put(&root.join("magic/4_face.png"), &placeholder);
+    fs::File::options()
+        .write(true)
+        .open(root.join("magic/4_face.png"))
+        .unwrap()
+        .set_modified(later)
+        .unwrap();
+    let out = t.join("new.jsonl");
+    audit(&flags(&[
+        ("objects", root),
+        ("out", out.clone()),
+        ("previous", previous),
+    ]))
+    .unwrap();
+    let rows = output_rows(&out);
+    assert_eq!(rows.len(), 4);
+    assert_eq!(rows[3]["reason"], "shared_bytes:cardtrader-preview");
+    let report = read_json(&t.join("new.jsonl.report.json")).unwrap();
+    assert_eq!(report["examined"], 1);
+    assert_eq!(report["carried_over"], 3);
 }

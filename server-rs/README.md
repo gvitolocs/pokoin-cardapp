@@ -114,7 +114,12 @@ Pokoin's coin-mascot missing-card art. Embedded, they become one vector shared b
 or grey photo then "matches" a placeholder. `card-placeholder` recognises both (size rule, difference hash and grey
 thumbnail against `card-placeholder/refs/`). Every step that feeds the index uses it:
 
-- `card-images audit` lists placeholder faces across the objects tree (all games).
+- `card-images audit` lists placeholder faces across the objects tree (all games). `--previous audit.jsonl`
+  uses that file's mtime as the cutoff: unchanged placeholder rows are carried over, disappeared rows drop
+  out, and newer faces are examined. Preserve the snapshot mtime with `cp -p`. Reports include `examined`
+  and `carried_over`; per-game counts cover examined files plus carried placeholders, not skipped real files.
+  Header-size checks still apply. New shared-byte groups can only be discovered among examined files and
+  carried placeholders; older real files are not rehashed. Use a full audit periodically to rediscover those groups.
 - `card-images recover` finds the real picture (same-blueprint sibling file, CardTrader full-size upload, TCGdex,
   pokemontcg.io, Scryfall), checks name, number and that it is a real card, never uses a base-set scan for a
   stamped printing, and with `--apply` writes it under the same key (originals backed up, `_homepage.webp` and
@@ -130,19 +135,61 @@ thumbnail against `card-placeholder/refs/`). Every step that feeds the index use
   zero-vector rows with ids in `reembed.txt`. Missing cards with unusable faces go in `noimage.jsonl` with full
   metadata and `"image": "none"`; `report.json` counts each group.
 - `index-refresh purge` is a **legacy**, destructive-to-row-count export command: it drops placeholder rows.
-  It remains available but is no longer used by the refresh pipeline. `card-images catalog-purge` handles
-  CardRails app catalogs separately.
+  It remains available but is no longer used by the refresh pipeline. `card-images catalog-purge` is also legacy.
+- `card-images catalog-mark --catalogs DIR --audit FILE --out DIR [--cos 0.995] [--only ids] [--embeddings FILE]`
+  keeps app rows and their field order, zeroes audited/near-placeholder f16 vectors, and merges sorted public
+  ids into each catalog's `noImagePublicIDs`. Existing zero rows stay no-image. Unchanged artifacts are hard-linked;
+  updated artifacts get content-hashed names. Output must be new and outside the source. Packs with a manifest's
+  `catalog_sha256` matching the catalog pin it against rewriting. The index preserves other keys and key order;
+  `placeholderMarkExport` records provenance and per-catalog counts (including pinned skips).
+  Embedding JSONL `{catalog,id,vector:[128 floats]}` replaces a public id's vector and clears no-image status.
+  An optional string `image` updates the existing image cell when recovering a row appended without a face.
+  An `append:{id,name,number,set,image}` object adds an absent public id in the existing field order, with other
+  cells null. A null vector appends a no-image row. Repeated appends are ignored. Cells remain strings or null.
 
 `scripts/refresh-index.sh BASE NEW WORK` runs audit → recover (`APPLY=1` to write) → plan → embed → enrich → mark guard.
 Use `MARK_BASE=1` on the first run with an old index that still contains placeholder vectors: it marks BASE into
 `WORK/base-marked` before planning. The guard fails if any non-zero row is newly marked; existing no-image rows
-are fine. Guard artifacts remain in `WORK/guard` for inspection. Switching the worker stays a manual step.
+are fine. Guard artifacts remain in `WORK/guard` for inspection. `SKIP_AUDIT=1 AUDIT=FILE` shares the index
+stages with the daily driver. If allow/reembed/noimage are all empty, it leaves NEW uncreated.
 
 The Python Milo bridge accepts `scripts/embed_append.py BASE FACES ALLOW OUT --reembed REEMBED --noimage NOIMAGE`.
 It checks embedder parity, replaces the requested zero-vector rows in place (preserving metadata except `image`,
 which becomes the staged face filename), appends allowed real faces, then appends new no-image metadata with zero
 vectors, skipping ids already present. Its progress includes `replaced` and `noimage_appended`. The index format
 remains f32 `[N,128]` `embeddings.npy` plus `metadata.jsonl`; no-image cards remain real index rows but cannot match.
+
+The existing `pokoin-all-cardtrader-daily` nightly job (23:00 UTC) should call
+`~/.local/lib/card-refresh/current/daily-card-refresh.sh` after its daily export. This repository supplies the
+driver; wiring the nightly job is maintained in `gvitolocs/pokoin`. Install with `scripts/install-card-refresh.sh`:
+it builds the two Rust tools, copies scripts and binaries into a git revision directory, and atomically selects
+`current`. Repository execution uses `target/release`; installed execution finds everything beside the driver.
+
+The driver locks `$CARD_STATE/lock` (`CARD_STATE=/home/nez/data/card-images` by default), preserves
+`audit.prev.jsonl`, audits incrementally, recovers with backups, and audits again before plan/embed/enrich/guard.
+Recovery uses the latest daily export and the datasets in `card-refresh-common.sh`. `EXPANSIONS` can provide a
+TSV instead of reading Postgres. `BASE_INDEX`, `OBJECTS`, `CATALOGS`, `DAILY`, `TCG_DATASETS`, and `EMBED_PYTHON`
+override inputs. CPU-heavy work uses a 400% systemd scope and waits when Tctl reaches 90 °C.
+
+With `SWAP=1` (default), a changed, guarded index gets `60-index.conf`, preserving previous matching drop-ins
+in `runs/<UTC timestamp>/dropins`. Health must report the new basename and row count; a direct `/identify?top_k=1`
+multipart `file` request must identify Numel ct_id 370861. Failures restore the drop-ins and restart the previous
+worker. `SWAP=0` stages without switching. Only indexes recorded by this driver in `indexes.txt` are eligible
+for retention deletion; the last five and the current/previous indexes are retained.
+
+`scripts/app_embed.py` imports the scanner's `card_cnn` preprocessing and runs the catalog MiloCNN on CPU
+(batch 8, four threads). It verifies 30 random western rows against stored f16 vectors, requiring minimum cosine
+0.995 (exit 2 on parity failure), then emits recovered no-image vectors and new cards from plan's cardmeta.
+Western, Japanese, and Chinese catalogs are eligible; pack-pinned catalogs are skipped. Missing faces append
+with an empty image and zero vector. The driver stages changed catalogs as `<YYYYMMDD>-auto-cards` (with suffixes)
+under `/home/nez/data/cardrails-catalogs`; `current` is repointed only with `CARDRAILS_CATALOG_AUTOPUBLISH=1`
+(default off). It prints the staged path otherwise.
+
+`DRY_RUN=1 CARD_STATE=/path/to/scratch scripts/daily-card-refresh.sh` downloads recovery candidates only into
+the run directory, never applies recovery, swaps, publishes, or prunes live indexes. Index and catalog outputs
+go under `$CARD_STATE/dry/`. Live index discovery uses read-only `/health` in dry mode; it makes no `systemctl`
+calls. Each run writes logs and `summary.json` below `runs/<UTC timestamp>/`, and prints a compact summary line
+with audit counts, recovery sources, missing reasons, index rows/no-image count, swap and catalog status.
 
 ## Production on nezopt (since 2026-10-30)
 

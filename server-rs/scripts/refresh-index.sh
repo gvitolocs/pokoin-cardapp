@@ -1,59 +1,39 @@
 #!/bin/bash
-# Index refresh with the placeholder guard, as run on 2026-10-30:
-#   1. card-images audit    every placeholder face in the CDN objects tree
-#   2. card-images recover  real pictures for them (dry run unless APPLY=1; then backups + derived files)
-#   3. index-refresh plan   stage new/recovered faces and no-image metadata
-#   4. embed_append.py      Milo embeddings of the staged faces (parity-checked against stored rows)
-#   5. index-refresh enrich names, numbers, sets, catalogs
-#   6. index-refresh mark   guard: fail if any non-zero row is newly marked
-# It never switches the live worker: point the nezopt-cardscan-rs drop-in at the printed index and restart.
-#
-# Usage: refresh-index.sh BASE_INDEX NEW_INDEX WORK_DIR
-#   env: MARK_BASE=1 to mark legacy BASE into WORK/base-marked; APPLY=1 to write recovered pictures; DAILY=<daily export dir> (default: latest)
+# Usage: refresh-index.sh BASE NEW WORK; SKIP_AUDIT=1 AUDIT=... for the daily driver.
 set -euo pipefail
 base=$1 new=$2 work=$3
-here=$(cd "$(dirname "$0")/.." && pwd)
-bin=$here/target/release
-objects=${OBJECTS:-/home/nez/data/pokoin-leftovers/objects}
-catalogs=${CATALOGS:-/home/nez/data/cardrails-catalogs/current}
-daily=${DAILY:-$(ls -d /home/nez/data/pokoin-catalog-refresh/daily/*/ | tail -1)}
-tcg=${TCG_DATASETS:-/home/nez/mnt/mybook/datasets/tcg}
-python=${EMBED_PYTHON:-/home/nez/Projects/Startup/Pokoin/pokoin-scanner/.venv/bin/python}
-capped=(systemd-run --user --scope -q -p CPUQuota=400%)
-
-[[ -e $new ]] && { echo "$new exists" >&2; exit 1; }
+# shellcheck source=scripts/card-refresh-common.sh
+source "$(dirname "$0")/card-refresh-common.sh"
+refresh_paths
+[[ ! -e $new ]] || { echo "$new exists" >&2; exit 1; }
 mkdir -p "$work"
-(cd "$here" && cargo build -q --release -p card-images -p index-refresh)
-
 if [[ ${MARK_BASE:-0} == 1 ]]; then
-  "${capped[@]}" "$bin/index-refresh" mark --index "$base" --objects "$objects" --out "$work/base-marked" --threads 4
+  heavy "$bin/index-refresh" mark --index "$base" --objects "$objects" --out "$work/base-marked" --threads 4
   base=$work/base-marked
 fi
-
-# pokoin_pokemon_expansions.official_id maps CardTrader expansions to pokemontcg/TCGdex set ids.
-docker exec -i pokoin-marketplace-postgres-15t psql -U pokoin_marketplace -d pokoin_marketplace -At -F $'\t' -c \
-  "select expansion_id, game_id, lower(official_id), lower(coalesce(code,'')), name, nationality
-   from pokoin_pokemon_expansions where expansion_id is not null order by 1" > "$work/expansions.tsv"
-
-"${capped[@]}" "$bin/card-images" audit --objects "$objects" --out "$work/audit.jsonl" --threads 4
-apply=()
-[[ ${APPLY:-0} == 1 ]] && apply=(--apply --backup "${BACKUP:-${objects%/objects}/backup-placeholders-$(date -u +%F)}")
-"$bin/card-images" recover --audit "$work/audit.jsonl" --objects "$objects" --blueprints "$daily" \
-  --expansions "$work/expansions.tsv" --tcgdex "$tcg/pokoin-cdn" --pokemontcg "$tcg/pokemon-tcg-data" \
-  --scryfall "$tcg/scryfall-default-cards.jsonl.gz" --out "$work/recover" --download "${apply[@]}"
-
-: > "$work/no-placeholder-list.txt"
-"$bin/index-refresh" plan --index "$base" --catalogs "$catalogs" --blueprints "$daily" --objects "$objects" \
-  --placeholders "$work/no-placeholder-list.txt" --out "$work/plan"
-"${capped[@]}" "$python" "$here/scripts/embed_append.py" "$base" "$work/plan/faces" "$work/plan/allow.txt" "$new" \
+if [[ ${SKIP_AUDIT:-0} != 1 ]]; then
+  expansions "$work/expansions.tsv"
+  heavy "$bin/card-images" audit --objects "$objects" --out "$work/audit.jsonl" --threads 4
+  apply=()
+  [[ ${APPLY:-0} == 1 && ${DRY_RUN:-0} != 1 ]] && apply=(--apply --backup "${BACKUP:-${objects%/objects}/backup-placeholders-$(date -u +%F)}")
+  recover_images "$work/audit.jsonl" "$work" "${apply[@]}"
+  heavy "$bin/card-images" audit --objects "$objects" --previous "$work/audit.jsonl" --out "$work/audit.after.jsonl" --threads 4
+fi
+audit=${AUDIT:-$work/audit.after.jsonl}
+# plan's detector guards all staged faces; audited ct_ids also exclude known placeholders.
+jq -r '.ct_id // empty' "$audit" > "$work/placeholders.txt"
+heavy "$bin/index-refresh" plan --index "$base" --catalogs "$catalogs" --blueprints "$daily" --objects "$objects" \
+  --placeholders "$work/placeholders.txt" --out "$work/plan"
+if [[ ! -s $work/plan/allow.txt && ! -s $work/plan/reembed.txt && ! -s $work/plan/noimage.jsonl ]]; then
+  echo "unchanged: $base"
+  exit 0
+fi
+heavy "$python" "$script_dir/embed_append.py" "$base" "$work/plan/faces" "$work/plan/allow.txt" "$new" \
   --reembed "$work/plan/reembed.txt" --noimage "$work/plan/noimage.jsonl"
 "$bin/index-refresh" enrich --index "$new" --cardmeta "$work/plan/cardmeta.jsonl"
-
-"${capped[@]}" "$bin/index-refresh" mark --index "$new" --objects "$objects" --out "$work/guard" --threads 4
-removed=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["newly_marked"])' \
-  "$work/guard/mark-report.json")
-if [[ $removed != 0 ]]; then
-  echo "guard: $new has $removed non-zero placeholder rows; inspect $work/guard/mark-report.json before going live" >&2
+heavy "$bin/index-refresh" mark --index "$new" --objects "$objects" --out "$work/guard" --threads 4
+if [[ $(jq .newly_marked "$work/guard/mark-report.json") != 0 ]]; then
+  echo "guard failed: inspect $work/guard/mark-report.json" >&2
   exit 1
 fi
 echo "ready: $new"

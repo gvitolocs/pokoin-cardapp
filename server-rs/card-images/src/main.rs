@@ -8,6 +8,7 @@ use std::fs;
 use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 use std::path::{Component, Path, PathBuf};
 
+mod catalog_mark;
 mod catalog_purge;
 mod recover;
 #[cfg(test)]
@@ -33,7 +34,13 @@ fn main() {
             Some("audit") => audit(&flags),
             Some("recover") => recover::run(&flags),
             Some("catalog-purge") => catalog_purge::run(&flags),
-            _ => Err("usage: card-images catalog-purge --catalogs DIR --audit FILE --out DIR [--cos 0.995] [--only id,id,...]\n       card-images audit --objects DIR --out FILE [--threads N]\n       card-images recover --audit FILE --objects DIR --blueprints DIR --expansions FILE --tcgdex DIR --pokemontcg DIR --scryfall FILE --out DIR [--download] [--apply --backup DIR]".into()),
+            Some("catalog-mark") => catalog_mark::run(&flags),
+            _ => Err(concat!(
+                "usage: card-images catalog-mark --catalogs DIR --audit FILE --out DIR [--cos 0.995] [--only ids] [--embeddings FILE]\n",
+                "       card-images catalog-purge --catalogs DIR --audit FILE --out DIR [--cos 0.995] [--only ids] (legacy)\n",
+                "       card-images audit --objects DIR --out FILE [--threads N] [--previous FILE]\n",
+                "       card-images recover --audit FILE --objects DIR --blueprints DIR --expansions FILE --tcgdex DIR --pokemontcg DIR --scryfall FILE --out DIR [--download] [--apply --backup DIR]"
+            ).into()),
         }
     })();
     if let Err(e) = result {
@@ -184,6 +191,28 @@ fn audit(flags: &Flags) -> Res<()> {
     let mut paths = Vec::new();
     walk(&objects, &mut paths)?;
     paths.sort();
+    let mut carried = Vec::new();
+    if flags.has("previous") {
+        let previous = flags.path("previous")?;
+        let cutoff = fs::metadata(&previous)?.modified()?;
+        lines(&previous, |v| {
+            let row: AuditRow = serde_json::from_value(v)?;
+            if fs::metadata(objects.join(safe_key(&row.key)?))
+                .and_then(|m| m.modified())
+                .is_ok_and(|mtime| mtime <= cutoff)
+            {
+                carried.push(row);
+            }
+            Ok(())
+        })?;
+        paths.retain(|p| {
+            fs::metadata(p)
+                .and_then(|m| m.modified())
+                .is_ok_and(|m| m > cutoff)
+        });
+    }
+    let examined = paths.len();
+    let carried_over = carried.len();
     let detector = Detector::builtin();
     let mut rows = parallel(&paths, n, |p| {
         let key = p.strip_prefix(&objects)?.to_string_lossy().into_owned();
@@ -223,6 +252,8 @@ fn audit(flags: &Flags) -> Res<()> {
             h,
         })
     })?;
+    let carried_keys: HashSet<_> = carried.iter().map(|r| r.key.clone()).collect();
+    rows.extend(carried);
     let mut groups: BTreeMap<(String, String), Vec<usize>> = BTreeMap::new();
     for (i, r) in rows.iter().enumerate().filter(|(_, r)| r.key.contains('/')) {
         groups
@@ -241,12 +272,25 @@ fn audit(flags: &Flags) -> Res<()> {
         })
         .collect();
     let verdicts = parallel(&groups, n, |g| {
+        if let Some(row) = g
+            .iter()
+            .map(|&i| &rows[i])
+            .find(|r| carried_keys.contains(&r.key))
+        {
+            return Ok(Verdict::Placeholder {
+                reason: "shared_bytes",
+                reference: row.reference.clone(),
+            });
+        }
         Ok(detector.classify(&fs::read(objects.join(&rows[g[0]].key))?))
     })?;
     let mut suspects = Vec::new();
     for (g, verdict) in groups.iter().zip(verdicts) {
         if let Verdict::Placeholder { reference, .. } = verdict {
             for &i in g {
+                if carried_keys.contains(&rows[i].key) {
+                    continue;
+                }
                 rows[i].reason = format!("shared_bytes:{reference}");
                 rows[i].reference = reference.clone();
             }
@@ -255,6 +299,7 @@ fn audit(flags: &Flags) -> Res<()> {
         }
     }
     let mut counts: BTreeMap<String, AuditCount> = BTreeMap::new();
+    rows.sort_by(|a, b| a.key.cmp(&b.key));
     let mut file = BufWriter::new(fs::File::create(&out)?);
     for row in &rows {
         let c = counts.entry(row.game.clone()).or_default();
@@ -266,7 +311,7 @@ fn audit(flags: &Flags) -> Res<()> {
         }
     }
     file.flush()?;
-    let report = json!({"games": counts, "suspect_groups": suspects});
+    let report = json!({"examined": examined, "carried_over": carried_over, "games": counts, "suspect_groups": suspects});
     write_json(
         &PathBuf::from(format!("{}.report.json", out.display())),
         &report,

@@ -24,6 +24,18 @@ up to 50 unrecognised shared-byte groups. Undecodable files count as files but
 are not labelled placeholders. Paths and reports are sorted deterministically.
 Symlinks are not followed during traversal.
 
+Use `--previous FILE` to carry unchanged placeholder rows and examine only files newer than FILE's mtime.
+Deleted rows disappear and recovered rows are reclassified. Keep the mtime when copying snapshots (`cp -p`).
+Reports add `examined` and `carried_over`; skipped old real files are absent from per-game counts. New byte-identical
+groups can only be discovered among examined files plus carried placeholder rows. Run a full audit to include
+older real files again.
+
+`catalog-mark --catalogs DIR --audit FILE --out DIR [--only id,id] [--cos 0.995] [--embeddings FILE]`
+exports a hard-linked revision with no-image rows preserved, zero f16 vectors and sorted `noImagePublicIDs`.
+It accepts app embedding replacements/appends, keeps positional string/null fields, and skips catalogs pinned
+by pack manifests. `catalog-purge` remains a legacy command. See the server README for the daily driver and
+app embedding contract.
+
 `recover` is offline and dry-run by default. It tries same-blueprint siblings,
 CardTrader, TCGdex, pokemontcg.io and Scryfall in that order, subject to game and
 stamp restrictions. Sibling directories are indexed once. Only relevant exports,

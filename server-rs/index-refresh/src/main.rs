@@ -718,7 +718,11 @@ fn rewrite_placeholders(flags: &Flags, marking: bool) -> Res<()> {
             )),
             // AVIF and other formats this build cannot read: the embedder could, so the row stays.
             (Verdict::Undecodable, None) => {
-                undecodable.push(rows[i]["filename"].clone());
+                if emb.row(i).iter().any(|v| *v != 0.0)
+                    && rows[i]["image"].as_str() != Some("none")
+                    && rows[i]["filename"].as_str().is_some_and(|s| !s.is_empty()) {
+                    undecodable.push(rows[i]["filename"].clone());
+                }
                 None
             }
             (Verdict::Real, None) => None,
@@ -943,6 +947,7 @@ mod tests {
         let report = read_json(&root.join("out/mark-report.json")).unwrap();
         assert_eq!(report["newly_marked"], 2);
         assert_eq!(report["no_image"], 3);
+        assert_eq!(report["kept_undecodable"], json!(["4_avif.jpg"]));
         assert_eq!(report["newly_marked_by_reason"]["face:cardtrader-preview"], 1);
         assert_eq!(report["newly_marked_by_reason"]["embedding"], 1);
         f.0.insert("index".into(), root.join("out").to_string_lossy().into_owned());
@@ -952,6 +957,21 @@ mod tests {
             read_json(&root.join("again/mark-report.json")).unwrap()["newly_marked"],
             0
         );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn undecodable_report_excludes_noimage_and_empty_filenames() {
+        let root = tree("undecodable");
+        fs::create_dir_all(root.join("objects")).unwrap();
+        write_index(&root.join("index"), &["", "2_zero.jpg", "3_none.jpg", "4_bad.jpg"],
+            &[Some(0), None, Some(1), Some(2)]);
+        let path = root.join("index/metadata.jsonl");
+        let text = fs::read_to_string(&path).unwrap().replace(
+            "\"filename\":\"3_none.jpg\"", "\"filename\":\"3_none.jpg\",\"image\":\"none\"");
+        fs::write(path, text).unwrap();
+        mark(&flags(&root, &["index", "objects", "out"])).unwrap();
+        assert_eq!(read_json(&root.join("out/mark-report.json")).unwrap()["kept_undecodable"], json!(["4_bad.jpg"]));
         fs::remove_dir_all(root).unwrap();
     }
 
