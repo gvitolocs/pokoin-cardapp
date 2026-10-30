@@ -6,6 +6,9 @@
 //!          allowlist, a report and `cardmeta.jsonl` (name, number, set, catalogs per ct_id).
 //! `enrich` rewrites an index's `metadata.jsonl` with those proper names, numbers, sets and
 //!          catalogs. Row order, ids and filenames stay; the old filename name moves to `slug`.
+//! `scan-objects` lists every face in the CDN objects tree that is a placeholder picture.
+//! `purge`  writes a copy of an index without placeholder rows: rows whose face is a placeholder,
+//!          and rows whose embedding is within `--cos` of a placeholder face's embedding.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
@@ -16,13 +19,19 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
+mod npy;
+mod placeholder;
+
+use placeholder::{Detector, Verdict};
+
 const POKEMON_GAME: u64 = 5;
 const SINGLES_CATEGORY: u64 = 73;
 const LANG_CATALOGS: [&str; 3] = ["pokemon_western", "pokemon_japanese", "pokemon_chinese"];
 const IMAGE_EXTS: [&str; 4] = ["jpg", "jpeg", "png", "webp"];
 // CardTrader serves its card back (186x260, 7920 bytes) when a blueprint has no picture.
 const CT_BACK_BYTES: u64 = 7920;
-const CT_BACK_SIZE: (u32, u32) = (186, 260);
+/// Cosine to a placeholder face's embedding above which an index row is that placeholder too.
+const PLACEHOLDER_COS: f32 = 0.995;
 
 type Res<T> = Result<T, String>;
 
@@ -46,9 +55,13 @@ fn main() {
     let result = match args.first().map(String::as_str) {
         Some("plan") => plan(&Flags::parse(&args[1..])),
         Some("enrich") => enrich(&Flags::parse(&args[1..])),
+        Some("scan-objects") => scan_objects(&Flags::parse(&args[1..])),
+        Some("purge") => purge(&Flags::parse(&args[1..])),
         _ => Err("usage: index-refresh plan --index DIR --catalogs DIR --blueprints DIR \
                   --objects DIR --placeholders FILE --out DIR\n       \
-                  index-refresh enrich --index DIR --cardmeta FILE"
+                  index-refresh enrich --index DIR --cardmeta FILE\n       \
+                  index-refresh scan-objects --objects DIR --out FILE [--threads N]\n       \
+                  index-refresh purge --index DIR --objects DIR --out DIR [--cos F] [--threads N]"
             .into()),
     };
     if let Err(e) = result {
@@ -71,6 +84,9 @@ impl Flags {
     }
     fn path(&self, key: &str) -> Res<PathBuf> {
         self.0.get(key).map(PathBuf::from).ok_or_else(|| format!("missing --{key}"))
+    }
+    fn num<T: std::str::FromStr>(&self, key: &str, default: T) -> Res<T> {
+        self.0.get(key).map_or(Ok(default), |v| v.parse().map_err(|_| format!("bad --{key} {v}")))
     }
 }
 
@@ -290,6 +306,7 @@ fn plan(flags: &Flags) -> Res<()> {
     }
 
     let faces = list_objects(&objects)?;
+    let detector = Detector::builtin();
     let staged = out.join("faces");
     fs::create_dir_all(&staged).map_err(|e| e.to_string())?;
     let mut picked: Vec<(u64, String, String)> = Vec::new(); // ct, file, sha256
@@ -318,9 +335,13 @@ fn plan(flags: &Flags) -> Res<()> {
             .and_then(|r| r.into_dimensions().ok());
         let reason = match dims {
             None => Some("undecodable"),
-            Some(d) if d == CT_BACK_SIZE || bytes.len() as u64 == CT_BACK_BYTES => Some("cardtrader_back"),
+            Some(_) if bytes.len() as u64 == CT_BACK_BYTES => Some("cardtrader_back"),
             Some((w, h)) if w < 120 || h < 120 => Some("too_small"),
-            _ => None,
+            _ => match detector.classify(&bytes) {
+                Verdict::Real => None,
+                Verdict::Undecodable => Some("undecodable"),
+                Verdict::Placeholder { .. } => Some("placeholder_face"),
+            },
         };
         if let Some(reason) = reason {
             skips.push(Skip { ct_id: m.ct_id, reason, file: Some(file) });
@@ -440,5 +461,155 @@ fn enrich(flags: &Flags) -> Res<()> {
     drop(w);
     fs::rename(&tmp, &src).map_err(|e| e.to_string())?;
     println!("rows={rows} named={named} slug_only={}", rows - named);
+    Ok(())
+}
+
+/// Classifies `items` on `threads` workers, keeping input order.
+fn classify_files(detector: &Detector, paths: &[PathBuf], threads: usize) -> Vec<Verdict> {
+    let chunk = paths.len().div_ceil(threads.max(1)).max(1);
+    std::thread::scope(|s| {
+        let handles: Vec<_> = paths
+            .chunks(chunk)
+            .map(|part| {
+                s.spawn(move || {
+                    part.iter()
+                        .map(|p| fs::read(p).map_or(Verdict::Undecodable, |b| detector.classify(&b)))
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        handles.into_iter().flat_map(|h| h.join().expect("classifier thread")).collect()
+    })
+}
+
+#[derive(Serialize)]
+struct Flagged {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ct_id: Option<u64>,
+    file: String,
+    reason: String,
+    reference: String,
+}
+
+fn scan_objects(flags: &Flags) -> Res<()> {
+    let (objects, out) = (flags.path("objects")?, flags.path("out")?);
+    let threads = flags.num("threads", 4usize)?;
+    let mut names: Vec<String> = fs::read_dir(&objects)
+        .map_err(|e| e.to_string())?
+        .filter_map(|e| e.ok().map(|e| e.file_name().to_string_lossy().into_owned()))
+        .filter(|n| n.rsplit_once('.').is_some_and(|(_, ext)| IMAGE_EXTS.contains(&ext.to_ascii_lowercase().as_str())))
+        .collect();
+    names.sort();
+    let paths: Vec<PathBuf> = names.iter().map(|n| objects.join(n)).collect();
+    let verdicts = classify_files(&Detector::builtin(), &paths, threads);
+    let mut w = BufWriter::new(fs::File::create(&out).map_err(|e| e.to_string())?);
+    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+    for (name, v) in names.iter().zip(&verdicts) {
+        let (reason, reference) = match v {
+            Verdict::Real => continue,
+            Verdict::Undecodable => ("undecodable".to_string(), String::new()),
+            Verdict::Placeholder { reason, reference } => (reason.to_string(), reference.clone()),
+        };
+        *counts.entry(format!("{reason}:{reference}")).or_default() += 1;
+        let ct_id = name.split_once('_').and_then(|(p, _)| p.parse().ok());
+        let row = Flagged { ct_id, file: name.clone(), reason, reference };
+        writeln!(w, "{}", serde_json::to_string(&row).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    }
+    w.flush().map_err(|e| e.to_string())?;
+    println!("files={} flagged={} {:?}", names.len(), counts.values().sum::<usize>(), counts);
+    Ok(())
+}
+
+fn cosine(a: &[f32], b: &[f32]) -> f32 {
+    let (mut dot, mut na, mut nb) = (0f32, 0f32, 0f32);
+    for (x, y) in a.iter().zip(b) {
+        dot += x * y;
+        na += x * x;
+        nb += y * y;
+    }
+    if na == 0.0 || nb == 0.0 {
+        0.0
+    } else {
+        dot / (na.sqrt() * nb.sqrt())
+    }
+}
+
+fn purge(flags: &Flags) -> Res<()> {
+    let (index, objects, out) = (flags.path("index")?, flags.path("objects")?, flags.path("out")?);
+    let threads = flags.num("threads", 4usize)?;
+    let min_cos = flags.num("cos", PLACEHOLDER_COS)?;
+    if out.exists() {
+        return Err(format!("{} already exists", out.display()));
+    }
+    let lines: Vec<String> = fs::read_to_string(index.join("metadata.jsonl"))
+        .map_err(|e| e.to_string())?
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(str::to_string)
+        .collect();
+    let emb = npy::read(&index.join("embeddings.npy"))?;
+    if emb.rows != lines.len() {
+        return Err(format!("{} embeddings for {} metadata rows", emb.rows, lines.len()));
+    }
+    let rows: Vec<Value> = lines.iter().map(|l| serde_json::from_str(l).map_err(|e| e.to_string())).collect::<Res<_>>()?;
+    let paths: Vec<PathBuf> =
+        rows.iter().map(|r| objects.join(r["filename"].as_str().unwrap_or_default())).collect();
+    let verdicts = classify_files(&Detector::builtin(), &paths, threads);
+
+    // One embedding per distinct placeholder picture: rows within `min_cos` of a kept one add nothing.
+    let mut refs: Vec<usize> = Vec::new();
+    for (i, v) in verdicts.iter().enumerate() {
+        if v.is_placeholder() && !refs.iter().any(|&j| cosine(emb.row(i), emb.row(j)) >= min_cos) {
+            refs.push(i);
+        }
+    }
+    let (mut removed, mut undecodable) = (Vec::new(), Vec::new());
+    let mut keep = Vec::with_capacity(rows.len());
+    for (i, v) in verdicts.iter().enumerate() {
+        let near = refs.iter().map(|&j| (j, cosine(emb.row(i), emb.row(j)))).find(|(_, c)| *c >= min_cos);
+        let reason = match (v, near) {
+            (Verdict::Placeholder { reference, .. }, _) => Some(format!("face:{reference}")),
+            (_, Some((j, c))) => Some(format!("embedding:cos={c:.4}:like={}", rows[j]["ct_id"].as_str().unwrap_or("?"))),
+            // AVIF and other formats this build cannot read: the embedder could, so the row stays.
+            (Verdict::Undecodable, None) => {
+                undecodable.push(rows[i]["filename"].clone());
+                None
+            }
+            (Verdict::Real, None) => None,
+        };
+        match reason {
+            Some(reason) => removed.push(json!({
+                "ct_id": rows[i]["ct_id"], "filename": rows[i]["filename"], "reason": reason,
+            })),
+            None => keep.push(i),
+        }
+    }
+
+    fs::create_dir_all(&out).map_err(|e| e.to_string())?;
+    let mut data = Vec::with_capacity(keep.len() * emb.cols);
+    let mut meta = BufWriter::new(fs::File::create(out.join("metadata.jsonl")).map_err(|e| e.to_string())?);
+    for &i in &keep {
+        data.extend_from_slice(emb.row(i));
+        writeln!(meta, "{}", lines[i]).map_err(|e| e.to_string())?;
+    }
+    meta.flush().map_err(|e| e.to_string())?;
+    npy::write(&out.join("embeddings.npy"), &npy::Matrix { rows: keep.len(), cols: emb.cols, data })?;
+    let mut by_reason: BTreeMap<String, usize> = BTreeMap::new();
+    for r in &removed {
+        let key = r["reason"].as_str().unwrap_or_default().split(":cos").next().unwrap_or_default().to_string();
+        *by_reason.entry(key).or_default() += 1;
+    }
+    let progress = json!({
+        "mode": "purge", "base": index.display().to_string(), "embedded": keep.len(),
+        "removed": removed.len(), "min_cos": min_cos,
+    });
+    fs::write(out.join("progress.json"), serde_json::to_string_pretty(&progress).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())?;
+    let report = json!({ "rows_in": rows.len(), "rows_out": keep.len(), "removed_by_reason": by_reason,
+                         "placeholder_vectors": refs.len(), "kept_undecodable": undecodable,
+                         "removed": removed });
+    fs::write(out.join("purge-report.json"), serde_json::to_string_pretty(&report).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())?;
+    println!("rows_in={} rows_out={} removed={} {:?}", rows.len(), keep.len(), removed.len(), by_reason);
     Ok(())
 }
