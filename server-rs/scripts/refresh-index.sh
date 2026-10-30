@@ -2,14 +2,14 @@
 # Index refresh with the placeholder guard, as run on 2026-10-30:
 #   1. card-images audit    every placeholder face in the CDN objects tree
 #   2. card-images recover  real pictures for them (dry run unless APPLY=1; then backups + derived files)
-#   3. index-refresh plan   stage faces of cards the index lacks (placeholder faces are skipped)
+#   3. index-refresh plan   stage new/recovered faces and no-image metadata
 #   4. embed_append.py      Milo embeddings of the staged faces (parity-checked against stored rows)
 #   5. index-refresh enrich names, numbers, sets, catalogs
-#   6. index-refresh purge  guard: the new index must have no placeholder rows (fails if it removes any)
+#   6. index-refresh mark   guard: fail if any non-zero row is newly marked
 # It never switches the live worker: point the nezopt-cardscan-rs drop-in at the printed index and restart.
 #
 # Usage: refresh-index.sh BASE_INDEX NEW_INDEX WORK_DIR
-#   env: APPLY=1 to write recovered pictures; DAILY=<daily export dir> (default: latest)
+#   env: MARK_BASE=1 to mark legacy BASE into WORK/base-marked; APPLY=1 to write recovered pictures; DAILY=<daily export dir> (default: latest)
 set -euo pipefail
 base=$1 new=$2 work=$3
 here=$(cd "$(dirname "$0")/.." && pwd)
@@ -24,6 +24,11 @@ capped=(systemd-run --user --scope -q -p CPUQuota=400%)
 [[ -e $new ]] && { echo "$new exists" >&2; exit 1; }
 mkdir -p "$work"
 (cd "$here" && cargo build -q --release -p card-images -p index-refresh)
+
+if [[ ${MARK_BASE:-0} == 1 ]]; then
+  "${capped[@]}" "$bin/index-refresh" mark --index "$base" --objects "$objects" --out "$work/base-marked" --threads 4
+  base=$work/base-marked
+fi
 
 # pokoin_pokemon_expansions.official_id maps CardTrader expansions to pokemontcg/TCGdex set ids.
 docker exec -i pokoin-marketplace-postgres-15t psql -U pokoin_marketplace -d pokoin_marketplace -At -F $'\t' -c \
@@ -40,15 +45,15 @@ apply=()
 : > "$work/no-placeholder-list.txt"
 "$bin/index-refresh" plan --index "$base" --catalogs "$catalogs" --blueprints "$daily" --objects "$objects" \
   --placeholders "$work/no-placeholder-list.txt" --out "$work/plan"
-"${capped[@]}" "$python" "$here/scripts/embed_append.py" "$base" "$work/plan/faces" "$work/plan/allow.txt" "$new"
+"${capped[@]}" "$python" "$here/scripts/embed_append.py" "$base" "$work/plan/faces" "$work/plan/allow.txt" "$new" \
+  --reembed "$work/plan/reembed.txt" --noimage "$work/plan/noimage.jsonl"
 "$bin/index-refresh" enrich --index "$new" --cardmeta "$work/plan/cardmeta.jsonl"
 
-"${capped[@]}" "$bin/index-refresh" purge --index "$new" --objects "$objects" --out "$work/guard" --threads 4
-removed=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["rows_in"] - json.load(open(sys.argv[1]))["rows_out"])' \
-  "$work/guard/purge-report.json")
-rm -rf "$work/guard"
+"${capped[@]}" "$bin/index-refresh" mark --index "$new" --objects "$objects" --out "$work/guard" --threads 4
+removed=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["newly_marked"])' \
+  "$work/guard/mark-report.json")
 if [[ $removed != 0 ]]; then
-  echo "guard: $new still has $removed placeholder rows; use index-refresh purge on it before going live" >&2
+  echo "guard: $new has $removed non-zero placeholder rows; inspect $work/guard/mark-report.json before going live" >&2
   exit 1
 fi
 echo "ready: $new"

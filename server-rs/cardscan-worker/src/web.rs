@@ -82,6 +82,7 @@ async fn health(State(state): State<Arc<AppState>>) -> Response {
         "ok": true,
         "host": "nezopt",
         "n": state.index.n(),
+        "no_image": state.index.no_image(),
         "identity": "ct_id",
         "detect": "yolo-onnx-cpu",
         "identify": "cdn-milo-128",

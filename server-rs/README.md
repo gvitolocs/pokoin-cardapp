@@ -63,13 +63,13 @@ embedding rows, matching `_load` in `cdn_app.py`.
 
 `POST /identify?...&catalog=<id>`:
 
-* absent, empty, `all` or `pokemon` → search every row, response `"catalog":"all"`;
+* absent, empty, `all` or `pokemon` → search every row with a non-zero vector, response `"catalog":"all"`;
 * `pokemon_western`, `pokemon_japanese`, `pokemon_chinese` → rows whose metadata
   `catalogs` contains that id **plus rows with empty `catalogs`** (uncatalogued
   cards stay findable), response `"catalog":"<id>"`;
 * anything else → every row, `"catalog":"all"`, and a warning on stderr.
 
-The per-catalog row lists are built once at load by `cardscan_core::route_rows`.
+The per-catalog row lists are built once at load using `cardscan_core::route_rows`, then filtered to exclude zero vectors. `/health` reports all metadata rows in `n` and zero-vector rows in `no_image`.
 
 ## Tests and checks
 
@@ -120,14 +120,29 @@ thumbnail against `card-placeholder/refs/`). Every step that feeds the index use
   stamped printing, and with `--apply` writes it under the same key (originals backed up, `_homepage.webp` and
   `previews/` regenerated). `recovered.jsonl` records source and licence per picture; `missing.jsonl` is what has
   no picture.
-- `index-refresh plan` skips placeholder faces, so a card with no real picture is left out of the index (and the
-  site shows Pokoin's missing-card).
-- `index-refresh purge` drops placeholder rows from an index (face, or embedding within cos 0.995 of one);
-  `card-images catalog-purge` does the same for the CardRails app catalogs into a new revision directory.
+- `index-refresh mark --index DIR --objects DIR --out DIR [--cos 0.995] [--threads N]` keeps every row
+  in order, replacing placeholder embeddings with all-zero vectors and setting `"image": "none"`. It also marks
+  stored vectors near a placeholder face's embedding, including files since recovered. Already-zero rows stay
+  no-image; undecodable faces (such as AVIF) are retained unless their vector matches a placeholder.
+  `--out` must not exist. `mark-report.json` records rows, newly marked counts by reason, and total `no_image`;
+  `progress.json` records completion.
+- `index-refresh plan` stages new real faces in `faces/` with ids in `allow.txt`, and recovered faces for existing
+  zero-vector rows with ids in `reembed.txt`. Missing cards with unusable faces go in `noimage.jsonl` with full
+  metadata and `"image": "none"`; `report.json` counts each group.
+- `index-refresh purge` is a **legacy**, destructive-to-row-count export command: it drops placeholder rows.
+  It remains available but is no longer used by the refresh pipeline. `card-images catalog-purge` handles
+  CardRails app catalogs separately.
 
-`scripts/refresh-index.sh BASE NEW WORK` runs audit, recover (`APPLY=1` to write), plan, embed
-(`scripts/embed_append.py`, the Milo embedder is Python), enrich, and a purge guard that fails if `NEW` still holds
-a placeholder row. Switching the worker stays a manual step (drop-in `60-index-<date>.conf`, restart).
+`scripts/refresh-index.sh BASE NEW WORK` runs audit → recover (`APPLY=1` to write) → plan → embed → enrich → mark guard.
+Use `MARK_BASE=1` on the first run with an old index that still contains placeholder vectors: it marks BASE into
+`WORK/base-marked` before planning. The guard fails if any non-zero row is newly marked; existing no-image rows
+are fine. Guard artifacts remain in `WORK/guard` for inspection. Switching the worker stays a manual step.
+
+The Python Milo bridge accepts `scripts/embed_append.py BASE FACES ALLOW OUT --reembed REEMBED --noimage NOIMAGE`.
+It checks embedder parity, replaces the requested zero-vector rows in place (preserving metadata except `image`,
+which becomes the staged face filename), appends allowed real faces, then appends new no-image metadata with zero
+vectors, skipping ids already present. Its progress includes `replaced` and `noimage_appended`. The index format
+remains f32 `[N,128]` `embeddings.npy` plus `metadata.jsonl`; no-image cards remain real index rows but cannot match.
 
 ## Production on nezopt (since 2026-10-30)
 
