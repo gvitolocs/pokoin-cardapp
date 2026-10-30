@@ -96,6 +96,13 @@ fn normalisation() {
     ));
     assert!(!recover::stamped("Spinning Top", "Common", "1_spinning-top-common.jpg"));
     assert!(!recover::stamped("Pokémon League Pass", "", "2_pokemon-league-pass.jpg"));
+    let bp = serde_json::json!({
+        "image_url": "https://cardtrader.com/uploads/blueprints/image/7/preview_onix.webp",
+        "image": {"url": "/uploads/blueprints/image/7/onix.webp"}
+    });
+    assert_eq!(recover::full_image_url(&bp), "https://www.cardtrader.com/uploads/blueprints/image/7/onix.webp");
+    let fallback = serde_json::json!({"image_url": "https://cardtrader.com/x/preview_a.jpg", "image": {"url": null}});
+    assert_eq!(recover::full_image_url(&fallback), "https://cardtrader.com/x/preview_a.jpg");
     for (a, b) in [
         ("me1", "me01"),
         ("me3", "me03"),

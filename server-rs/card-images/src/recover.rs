@@ -104,6 +104,19 @@ fn number_match(a: &str, b: &str) -> bool {
         .iter()
         .any(|n| b.iter().any(|v| n.eq_ignore_ascii_case(v)))
 }
+/// `image_url` is CardTrader's small `preview_` rendition (too small to pass `verified`); `image.url` is the
+/// full-size upload, relative to the site.
+pub(super) fn full_image_url(v: &Value) -> String {
+    let full = string(&v["image"]["url"]);
+    if full.starts_with('/') {
+        format!("https://www.cardtrader.com{full}")
+    } else if full.starts_with("https://") {
+        full
+    } else {
+        string(&v["image_url"])
+    }
+}
+
 fn words(s: &str) -> Vec<String> {
     s.split(|c: char| !c.is_alphanumeric()).map(fold).filter(|w| !w.is_empty()).collect()
 }
@@ -199,7 +212,7 @@ impl Catalogs {
                         number: string(&v["fixed_properties"]["collector_number"]),
                         game: v["game_id"].as_u64().unwrap_or_default(),
                         expansion: v["expansion_id"].as_u64().unwrap_or_default(),
-                        url: string(&v["image_url"]),
+                        url: full_image_url(v),
                         scryfall: string(&v["scryfall_id"]),
                     },
                 );
