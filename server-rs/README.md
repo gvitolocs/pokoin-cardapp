@@ -107,6 +107,28 @@ curl -s -F file=@/home/nez/data/pokoin-leftovers/objects/370861_numel.jpg \
   --images /home/nez/scratch/cardscan-refresh-2026-10-29/known30.txt
 ```
 
+## Index refresh and placeholder pictures
+
+Some CDN faces are not the card: CardTrader's grey card back (186x260, `fallbacks/card_uploader/preview.png`) and
+Pokoin's coin-mascot missing-card art. Embedded, they become one vector shared by hundreds of rows, and a blurry
+or grey photo then "matches" a placeholder. `card-placeholder` recognises both (size rule, difference hash and grey
+thumbnail against `card-placeholder/refs/`). Every step that feeds the index uses it:
+
+- `card-images audit` lists placeholder faces across the objects tree (all games).
+- `card-images recover` finds the real picture (same-blueprint sibling file, CardTrader full-size upload, TCGdex,
+  pokemontcg.io, Scryfall), checks name, number and that it is a real card, never uses a base-set scan for a
+  stamped printing, and with `--apply` writes it under the same key (originals backed up, `_homepage.webp` and
+  `previews/` regenerated). `recovered.jsonl` records source and licence per picture; `missing.jsonl` is what has
+  no picture.
+- `index-refresh plan` skips placeholder faces, so a card with no real picture is left out of the index (and the
+  site shows Pokoin's missing-card).
+- `index-refresh purge` drops placeholder rows from an index (face, or embedding within cos 0.995 of one);
+  `card-images catalog-purge` does the same for the CardRails app catalogs into a new revision directory.
+
+`scripts/refresh-index.sh BASE NEW WORK` runs audit, recover (`APPLY=1` to write), plan, embed
+(`scripts/embed_append.py`, the Milo embedder is Python), enrich, and a purge guard that fails if `NEW` still holds
+a placeholder row. Switching the worker stays a manual step (drop-in `60-index-<date>.conf`, restart).
+
 ## Production on nezopt (since 2026-10-30)
 
 `nezopt-cardscan-rs.service` (user unit) serves 127.0.0.1:8098, the port the Pi's SSH tunnel reaches, in place of
@@ -130,6 +152,7 @@ Type=simple
 Environment=HOME=/home/nez
 Environment=ORT_DYLIB_PATH=/home/nez/Projects/Startup/Pokoin/BattleScan/.venv/lib/python3.12/site-packages/onnxruntime/capi/libonnxruntime.so.1.29.0
 Environment=CDN_MILO=/home/nez/Projects/Startup/Pokoin/PokoinTest/index/cdn_milo_2026-10-29
+# live index set by drop-in nezopt-cardscan-rs.service.d/60-index-2026-10-30.conf: cdn_milo_2026-10-30b
 Environment=MILO_ONNX=/home/nez/Projects/Startup/Pokoin/BattleScan/clones/CollectorVision/collector_vision/weights/milo.onnx
 Environment=YOLO_ONNX=/home/nez/Projects/Startup/Pokoin/BattleScan/clones/TCG/backend/models/card_detector.onnx
 Environment=CARDSCAN_WEB=/home/nez/Projects/Startup/Pokoin/BattleScan/web
