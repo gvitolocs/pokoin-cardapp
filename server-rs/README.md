@@ -107,27 +107,38 @@ curl -s -F file=@/home/nez/data/pokoin-leftovers/objects/370861_numel.jpg \
   --images /home/nez/scratch/cardscan-refresh-2026-10-29/known30.txt
 ```
 
-## Sample systemd user unit
+## Production on nezopt (since 2026-10-30)
 
-Not installed; keep it in the repo only. `MemoryMax` is optional but useful on
-nezopt.
+`nezopt-cardscan-rs.service` (user unit) serves 127.0.0.1:8098, the port the Pi's SSH tunnel reaches, in place of
+the Python `nezopt-cardscan.service`. The two units conflict: starting one stops the other.
+
+- Binary: `~/.local/lib/cardscan-rs/<commit>/cardscan-worker`, with `current` pointing at the live one, so the worktree can be
+  rebuilt or removed without touching production. To deploy a new build: copy it to a new `<commit>` directory, move
+  `current`, then `systemctl --user restart nezopt-cardscan-rs`.
+- Rollback to the Python worker (same index): `cardscan-rollback` (`~/.local/bin`), which disables the Rust unit and
+  enables and starts the Python one.
 
 ```ini
 [Unit]
-Description=Pokoin cardscan worker (Rust)
-After=network.target
+Description=Pokoin cardscan identify on nezopt (Rust worker, CDN-Milo, ONNX detector)
+After=network-online.target
+Wants=network-online.target
+Conflicts=nezopt-cardscan.service
 
 [Service]
 Type=simple
-WorkingDirectory=/home/nez/Projects/BattleScan/server-rs
+Environment=HOME=/home/nez
 Environment=ORT_DYLIB_PATH=/home/nez/Projects/Startup/Pokoin/BattleScan/.venv/lib/python3.12/site-packages/onnxruntime/capi/libonnxruntime.so.1.29.0
 Environment=CDN_MILO=/home/nez/Projects/Startup/Pokoin/PokoinTest/index/cdn_milo_2026-10-29
 Environment=MILO_ONNX=/home/nez/Projects/Startup/Pokoin/BattleScan/clones/CollectorVision/collector_vision/weights/milo.onnx
+Environment=YOLO_ONNX=/home/nez/Projects/Startup/Pokoin/BattleScan/clones/TCG/backend/models/card_detector.onnx
 Environment=CARDSCAN_WEB=/home/nez/Projects/Startup/Pokoin/BattleScan/web
-Environment=CARDSCAN_PORT=8096
 Environment=CARDSCAN_THREADS=4
-ExecStart=/home/nez/Projects/BattleScan/server-rs/target/release/cardscan-worker
-Restart=on-failure
+Environment=CARDSCAN_BIND=127.0.0.1
+Environment=CARDSCAN_PORT=8098
+ExecStart=/home/nez/.local/lib/cardscan-rs/current/cardscan-worker
+Restart=always
+RestartSec=5
 MemoryMax=4G
 
 [Install]
