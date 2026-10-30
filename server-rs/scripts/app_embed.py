@@ -124,9 +124,13 @@ def main():
                     pending.append({'catalog': cid, 'id': row['id'], 'image': PREFIX + k})
                     paths.append(args.objects / k)
                     replaced += 1
+            # Only cards CardTrader added after the catalog's newest card are appended (blueprint ids grow over
+            # time). Older cards missing from a legacy catalog were left out by its membership rules (World
+            # Championship Decks, starter decks, ...); adding them is a membership change, not a nightly one.
+            newest = max((int(i) // 2 for i in existing if i.isdigit()), default=0)
             for card in meta:
                 public = str(2 * int(card['ct_id']))
-                if cid not in card.get('catalogs', []) or public in existing:
+                if cid not in card.get('catalogs', []) or public in existing or int(card['ct_id']) <= newest:
                     continue
                 existing.add(public)
                 candidates = faces.get(int(card['ct_id']), [])
