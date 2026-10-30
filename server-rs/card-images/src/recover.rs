@@ -104,27 +104,31 @@ fn number_match(a: &str, b: &str) -> bool {
         .iter()
         .any(|n| b.iter().any(|v| n.eq_ignore_ascii_case(v)))
 }
-/// CardTrader puts the stamp in `version` (`Non-Holo Promo | BW95 | Finalist`) or a `(...)` name suffix. The bare
-/// name is not checked, so the unstamped `Champions Festival` SM148 still matches the reference datasets.
-pub(super) fn stamped(name: &str, version: &str) -> bool {
+fn words(s: &str) -> Vec<String> {
+    s.split(|c: char| !c.is_alphanumeric()).map(fold).filter(|w| !w.is_empty()).collect()
+}
+
+/// CardTrader marks a stamped printing in `version` (`Non-Holo Promo | BW95 | Finalist`), in a `(...)` name suffix,
+/// or only in the key's slug (`124009_tropical-wind-semi-finalist-non-holo-promo-26-...`, version `Non-Holo Promo | 26`).
+/// The card name itself is not checked, so the unstamped `Champions Festival` SM148 still matches the datasets.
+pub(super) fn stamped(name: &str, version: &str, key: &str) -> bool {
+    const STAMPS: [&str; 10] = [
+        "finalist", "champion", "staff", "prerelease", "winner", "stamp", "stamped", "league", "championship",
+        "participant",
+    ];
+    const PLACES: [&str; 10] = ["two", "four", "eight", "sixteen", "thirty", "sixty", "4", "8", "16", "32"];
     let name = name.trim();
     let suffix = name.strip_suffix(')').and_then(|n| n.rfind('(').map(|i| &n[i..])).unwrap_or_default();
-    let s = format!("{suffix} {version}").to_lowercase();
-    [
-        "finalist",
-        "semi-finalist",
-        "champion",
-        "top sixteen",
-        "top eight",
-        "staff",
-        "prerelease",
-        "winner",
-        "stamp",
-        "league",
-        "championship",
-    ]
-    .iter()
-    .any(|w| s.contains(w))
+    let stem = Path::new(key).file_stem().and_then(|s| s.to_str()).unwrap_or_default();
+    let mut slug = words(stem.split_once('_').map_or("", |(_, s)| s));
+    let bare = words(name.split('(').next().unwrap_or_default());
+    if !bare.is_empty() && slug.starts_with(&bare) {
+        slug.drain(..bare.len());
+    }
+    let mut text = words(&format!("{suffix} {version}"));
+    text.extend(slug);
+    text.iter().any(|w| STAMPS.contains(&w.as_str()) || w.ends_with("finalist") || w.ends_with("championships"))
+        || text.windows(2).any(|p| p[0] == "top" && PLACES.contains(&p[1].as_str()))
 }
 pub(super) fn alias(s: &str) -> &str {
     match s {
@@ -205,7 +209,7 @@ impl Catalogs {
         let mut pokemon = HashMap::new();
         let wanted: HashSet<_> = blueprints
             .values()
-            .filter(|b| b.game == 5 && !stamped(&b.name, &b.version))
+            .filter(|b| b.game == 5 && !stamped(&b.name, &b.version, ""))
             .filter_map(|b| expansions.get(&b.expansion))
             .filter(|e| !e.official.is_empty())
             .map(|e| {
@@ -259,7 +263,7 @@ impl Catalogs {
         }
         let scry_ids: HashSet<_> = blueprints
             .values()
-            .filter(|b| b.game == 1 && !b.scryfall.is_empty() && !stamped(&b.name, &b.version))
+            .filter(|b| b.game == 1 && !b.scryfall.is_empty() && !stamped(&b.name, &b.version, ""))
             .map(|b| b.scryfall.clone())
             .collect();
         let mut scryfall = HashMap::new();
@@ -494,7 +498,7 @@ impl Search<'_> {
                 }));
             }
         }
-        if stamped(&b.name, &b.version) {
+        if stamped(&b.name, &b.version, &row.key) {
             return Ok(Err("stamped_variant"));
         }
         if b.game == 5 {

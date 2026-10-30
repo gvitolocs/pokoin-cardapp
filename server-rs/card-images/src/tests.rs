@@ -75,13 +75,27 @@ fn normalisation() {
         "Stamp",
         "League",
         "Championship",
+        "Top Thirty-Two",
+        "Quarter-Finalist",
     ] {
-        assert!(recover::stamped("Numel", stamp));
+        assert!(recover::stamped("Numel", stamp, ""), "{stamp}");
     }
-    assert!(!recover::stamped("Numel", "Full Art"));
-    assert!(!recover::stamped("Champions Festival", "Holo Promo | SM148"));
-    assert!(recover::stamped("Champions Festival", "Non-Holo Promo | BW95 | Finalist"));
-    assert!(recover::stamped("Pikachu (Staff)", ""));
+    assert!(!recover::stamped("Numel", "Full Art", ""));
+    assert!(!recover::stamped(
+        "Champions Festival",
+        "Holo Promo | SM148",
+        "126934_champions-festival-holo-promo-sm148-sm-black-star-promos.png"
+    ));
+    assert!(recover::stamped("Champions Festival", "Non-Holo Promo | BW95 | Finalist", ""));
+    assert!(recover::stamped("Pikachu (Staff)", "", ""));
+    // CardTrader left the stamp out of `version`; only the key slug says it.
+    assert!(recover::stamped(
+        "Tropical Wind",
+        "Non-Holo Promo | 26",
+        "124009_tropical-wind-semi-finalist-non-holo-promo-26-nintendo-black-star-promos.jpg"
+    ));
+    assert!(!recover::stamped("Spinning Top", "Common", "1_spinning-top-common.jpg"));
+    assert!(!recover::stamped("Pokémon League Pass", "", "2_pokemon-league-pass.jpg"));
     for (a, b) in [
         ("me1", "me01"),
         ("me3", "me03"),
