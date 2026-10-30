@@ -133,6 +133,14 @@ if jq -e -s '.[0].catalogs != .[1].catalogs' "$catalogs/index.json" "$catalog_ou
 else
   rm -rf -- "$catalog_out"
 fi
+# Unpublished nightly revisions pile up while publishing waits for the owner: keep the newest 3, never the live one.
+if [[ $dry == 0 ]]; then
+  live_catalogs=$(readlink -f /home/nez/data/cardrails-catalogs/current)
+  mapfile -t autos < <(find /home/nez/data/cardrails-catalogs -mindepth 1 -maxdepth 1 -type d -name '*-auto-cards*' | sort)
+  for ((i=0; i<${#autos[@]}-3; i++)); do
+    [[ ${autos[i]} == "$live_catalogs" ]] || rm -rf -- "${autos[i]}"
+  done
+fi
 active=$base
 [[ ! -d $new ]] || active=$new
 rows=$(wc -l < "$active/metadata.jsonl")
