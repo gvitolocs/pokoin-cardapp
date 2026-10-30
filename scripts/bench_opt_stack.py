@@ -22,7 +22,7 @@ import cv2
 import numpy as np
 from PIL import Image
 
-ROOT = Path("/home/nez/Projects/BattleScan")
+ROOT = Path("/home/nez/Projects/Startup/Pokoin/BattleScan")
 PHOTOS = ROOT / "images"
 TCG_PT = ROOT / "clones/TCG/backend/models/card_detector.pt"
 ONNX_OUT = ROOT / "models/card_detector.onnx"

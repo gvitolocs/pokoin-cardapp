@@ -1,7 +1,7 @@
 # How to feed one photo
 
 ```bash
-cd /home/nez/Projects/BattleScan
+cd /home/nez/Projects/Startup/Pokoin/BattleScan
 . .venv/bin/activate
 python scripts/run_keepers.py images/YOUR.jpg
 ```

@@ -18,11 +18,11 @@ import cv2
 import numpy as np
 from PIL import Image
 
-ROOT = Path("/home/nez/Projects/BattleScan")
+ROOT = Path("/home/nez/Projects/Startup/Pokoin/BattleScan")
 PHOTOS = ROOT / "images"
 TCG_PT = ROOT / "clones/TCG/backend/models/card_detector.pt"
-INDEX = Path("/home/nez/Projects/pokoin/PokoinTest/index/blueprint_clip")
-SCRIPTS = Path("/home/nez/Projects/pokoin/PokoinTest/scripts")
+INDEX = Path("/home/nez/Projects/Startup/Pokoin/PokoinTest/index/blueprint_clip")
+SCRIPTS = Path("/home/nez/Projects/Startup/Pokoin/PokoinTest/scripts")
 MIN_AREA = 0.01
 
 GT_POKEMON = {

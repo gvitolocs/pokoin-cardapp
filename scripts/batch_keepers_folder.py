@@ -12,7 +12,7 @@ import cv2
 import numpy as np
 from PIL import Image
 
-ROOT = Path("/home/nez/Projects/BattleScan")
+ROOT = Path("/home/nez/Projects/Startup/Pokoin/BattleScan")
 TCG_WEIGHTS = ROOT / "clones/TCG/backend/models/card_detector.pt"
 SHREY_WEIGHTS = (
     ROOT

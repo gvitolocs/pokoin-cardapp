@@ -1,0 +1,8 @@
+[package]
+name = "scan-compare"
+version = "0.1.0"
+edition = "2021"
+description = "Post the same images to two /identify servers, interleaved, and compare top-1 and latency."
+
+[dependencies]
+serde_json = "1"
