@@ -74,6 +74,7 @@ async fn health_shape_and_catalog_counts() {
     assert_eq!(v["ok"], true);
     assert_eq!(v["host"], "nezopt");
     assert_eq!(v["n"], 3);
+    assert_eq!(v["no_image"], 0);
     assert_eq!(v["identity"], "ct_id");
     assert_eq!(v["detect"], "yolo-onnx-cpu");
     assert_eq!(v["identify"], "cdn-milo-128");
@@ -226,4 +227,22 @@ async fn cors_allows_pokoin_and_vercel_only() {
         .headers()
         .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
         .is_none());
+}
+
+#[test]
+fn zero_rows_never_match_in_any_route() {
+    let cards = vec![card("1", &["pokemon_western"]), card("2", &[])];
+    let mut raw = vec![0.0; 256];
+    raw[0] = 1.0;
+    let index = Index::from_parts(cards, raw, 128).unwrap();
+    assert_eq!(index.n(), 2);
+    assert_eq!(index.no_image(), 1);
+    // Negative similarity would otherwise put the zero row first.
+    let query = vec![-1.0; 128];
+    for request in [None, Some("all"), Some("typo"), Some("pokemon_western"), Some("pokemon_japanese"), Some("pokemon_chinese")] {
+        let rows = index.route(request).2;
+        assert!(!rows.contains(&1));
+        let hits = index.search(&query, index.cards.len(), rows);
+        assert!(hits.iter().all(|hit| hit.card.ct_id != "2"));
+    }
 }

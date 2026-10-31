@@ -97,18 +97,20 @@ impl Index {
             return Err("embedding data does not match card rows".to_string());
         }
         let mut rows = raw;
+        let mut usable = Vec::with_capacity(cards.len());
         for row in rows.chunks_exact_mut(dims) {
             let norm = row
                 .iter()
                 .map(|v| (*v as f64) * (*v as f64))
                 .sum::<f64>()
                 .sqrt();
+            usable.push(norm > 0.0);
             let scale = 1.0 / norm.max(1e-8);
             for v in row.iter_mut() {
                 *v = (*v as f64 * scale) as f32;
             }
         }
-        let all = (0..cards.len()).collect();
+        let all = (0..cards.len()).filter(|&i| usable[i]).collect();
         let mut routes = BTreeMap::new();
         for id in CATALOGS {
             let member: Vec<bool> = cards
@@ -116,7 +118,13 @@ impl Index {
                 .map(|c| c.catalogs.iter().any(|x| x == id))
                 .collect();
             let uncatalogued: Vec<bool> = cards.iter().map(|c| c.catalogs.is_empty()).collect();
-            routes.insert(id, route_rows(&member, &uncatalogued, false));
+            routes.insert(
+                id,
+                route_rows(&member, &uncatalogued, false)
+                    .into_iter()
+                    .filter(|&i| usable[i])
+                    .collect(),
+            );
         }
         Ok(Self {
             cards,
@@ -129,6 +137,10 @@ impl Index {
 
     pub fn n(&self) -> usize {
         self.cards.len()
+    }
+
+    pub fn no_image(&self) -> usize {
+        self.cards.len() - self.all.len()
     }
 
     pub fn catalog_counts(&self) -> BTreeMap<&'static str, usize> {
