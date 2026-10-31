@@ -158,6 +158,8 @@ It checks embedder parity, replaces the requested zero-vector rows in place (pre
 which becomes the staged face filename), appends allowed real faces, then appends new no-image metadata with zero
 vectors, skipping ids already present. Its progress includes `replaced` and `noimage_appended`. The index format
 remains f32 `[N,128]` `embeddings.npy` plus `metadata.jsonl`; no-image cards remain real index rows but cannot match.
+The image gallery is the parity reference (`--gallery DIR` is repeatable, in lookup order); after the index is
+written, re-embedded faces replace gallery pictures with backups, and appended faces are added to the last gallery directory.
 
 The existing `pokoin-all-cardtrader-daily` nightly job (23:00 UTC) should call
 `~/.local/lib/card-refresh/current/daily-card-refresh.sh` after its daily export. This repository supplies the
