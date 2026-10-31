@@ -127,8 +127,11 @@ def main():
     (out_dir / "progress.json").write_text(json.dumps({"mode": "append", "provider": "cpu", "embedded": int(arr.shape[0]),
         "appended": len(rows), "replaced": replaced, "noimage_appended": len(noimage_rows), "base": str(old_dir), "parity_min_cos": round(min(cos), 6), "elapsed_s": round(time.time() - t0, 1)}, indent=2))
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
-    gallery_replaced, gallery_added = update_gallery(gallery, gallery_items, stamp,
-        [(r["filename"], by_ct[r["ct_id"]]) for r in rows])
+    # daily-card-refresh.sh dry runs must not touch the shared gallery.
+    gallery_replaced = gallery_added = 0
+    if os.environ.get("DRY_RUN", "0") == "0":
+        gallery_replaced, gallery_added = update_gallery(gallery, gallery_items, stamp,
+            [(r["filename"], by_ct[r["ct_id"]]) for r in rows])
     print(f"gallery replaced={gallery_replaced} added={gallery_added}", flush=True)
     print(f"appended={len(rows)} replaced={replaced} noimage_appended={len(noimage_rows)} total={arr.shape[0]} elapsed={time.time()-t0:.1f}s", flush=True)
 
