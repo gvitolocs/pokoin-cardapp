@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from embed_append import update_gallery
+from embed_append import gallery_filename, update_gallery
 
 
 class GalleryTests(unittest.TestCase):
@@ -61,6 +61,32 @@ class GalleryTests(unittest.TestCase):
         self.assertEqual(list(target.parent.iterdir()), [target])
         self.assertEqual(target.read_bytes(), b"old face")
         self.assertEqual((self.root / "backup-gallery-test" / target.parent.name / target.name).read_bytes(), b"old face")
+
+    def test_empty_filename_falls_back_to_face_name(self):
+        face = self.root / "123_some-card.jpg"
+        face.write_bytes(b"named face")
+        for empty in ("", None, "  "):
+            self.assertEqual(gallery_filename(empty, face), "123_some-card.jpg")
+        self.assertEqual(gallery_filename("kept.jpg", face), "kept.jpg")
+        filename = gallery_filename("", face)
+        self.assertEqual(update_gallery(self.galleries, [(filename, face)], "test"), (0, 1))
+        self.assertEqual((self.galleries[-1] / "123_some-card.jpg").read_bytes(), b"named face")
+        self.assertEqual(update_gallery(self.galleries, [(filename, face)], "test2"), (1, 0))
+        self.assertEqual(sorted(p.name for p in self.galleries[-1].iterdir()), ["123_some-card.jpg"])
+
+    def test_invalid_filenames_raise_before_any_write(self):
+        (self.galleries[0] / "dir.jpg").mkdir()
+        for bad in ("", "a/b.jpg", "../x.jpg", "..", "dir.jpg"):
+            with self.subTest(bad=bad):
+                with self.assertRaisesRegex(ValueError, "gallery item"):
+                    update_gallery(self.galleries, [("good.jpg", self.face), (bad, self.face)], "test")
+                with self.assertRaisesRegex(ValueError, "gallery item"):
+                    update_gallery(self.galleries, [], "test", [("good.jpg", self.face), (bad, self.face)])
+                self.assertFalse((self.galleries[-1] / "good.jpg").exists())
+                self.assertEqual(list(self.galleries[-1].iterdir()), [])
+                self.assertEqual(list(self.root.glob("backup-gallery-*")), [])
+        self.assertEqual(sorted(p.name for p in self.root.iterdir() if p.parent == self.root and p.name.startswith(".")), [])
+        self.assertFalse((self.root / "x.jpg").exists())
 
 
 if __name__ == "__main__":
