@@ -9,8 +9,26 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
+def gallery_filename(filename, face):
+    """Metadata filename, or the face file's own name when it is empty or missing (as for new rows)."""
+    return filename if isinstance(filename, str) and filename.strip() else Path(face).name
+
+
+def check_gallery_items(galleries, items):
+    for filename, face in items:
+        bad = None
+        if not isinstance(filename, str) or not filename.strip(): bad = "empty filename"
+        elif "/" in filename or "\\" in filename or "\0" in filename: bad = "path separator in filename"
+        elif filename in (".", "..") or ".." in Path(filename).parts: bad = "'..' in filename"
+        elif any((g / filename).is_dir() for g in galleries): bad = "destination is a directory"
+        if bad: raise ValueError(f"gallery item {filename!r} (face {face}): {bad}")
+
+
 def update_gallery(galleries, items, stamp, append_items=()):
     """Sync re-embedded faces (with backups), then append missing gallery faces."""
+    items, append_items = list(items), list(append_items)
+    check_gallery_items(galleries, items + append_items)  # validate everything before the first copy
+
     def atomic_copy(src, dst):
         dst.parent.mkdir(parents=True, exist_ok=True)
         fd, tmp = tempfile.mkstemp(prefix=f".{dst.name}.", dir=dst.parent)
@@ -103,6 +121,7 @@ def main():
             old[i] = vector
             row = json.loads(lines[i])
             row["image"] = p.name
+            row["filename"] = gallery_filename(row.get("filename"), p)
             lines[i] = json.dumps(row)
             gallery_items.append((row["filename"], p))
             replaced += 1
