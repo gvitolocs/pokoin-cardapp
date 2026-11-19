@@ -30,6 +30,13 @@ def pins(value):
             yield from pins(v)
 
 
+def worst_rows(cosines, ids, images, count=3):
+    """Up to `count` lowest-parity rows as (cosine, row id, image key), worst first; ties by row id."""
+    ranked = sorted(((float(cosine), row_id, image) for cosine, row_id, image in zip(cosines, ids, images)),
+                    key=lambda row: (row[0], row[1]))
+    return ranked[:count]
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for flag in ('catalogs', 'objects', 'audit', 'cardmeta', 'out'):
@@ -92,6 +99,11 @@ def main():
     cosine = np.sum(fresh * card_cnn.l2_normalize(vectors[pick].astype(np.float32)), axis=1)
     minimum = float(cosine.min())
     print(f'parity n={len(pick)} min={minimum:.6f}', flush=True)
+    row_ids = [rows[i]['id'] for i in pick]
+    image_keys = [key(rows[i]['image']) for i in pick]
+    print(f'parity below 0.995: {sum(1 for v in cosine if float(v) < 0.995)} of {len(pick)}', flush=True)
+    for c, row_id, image_key in worst_rows(cosine, row_ids, image_keys):
+        print(f'parity row id={row_id} cos={c:.6f} image={image_key}', flush=True)
     if not np.isfinite(minimum) or minimum < 0.995:
         return 2
     meta = [json.loads(line) for line in args.cardmeta.read_text().splitlines() if line.strip()]
