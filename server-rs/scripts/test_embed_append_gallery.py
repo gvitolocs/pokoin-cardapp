@@ -89,5 +89,35 @@ class GalleryTests(unittest.TestCase):
         self.assertFalse((self.root / "x.jpg").exists())
 
 
+class AppEmbedWorstRowsTests(unittest.TestCase):
+    def test_three_lowest_of_five_returned_ascending(self):
+        from app_embed import worst_rows
+        cosines = [0.9900, 0.9455, 0.9999, 0.9300, 0.9800]
+        ids = ["10", "20", "30", "40", "50"]
+        images = ["a.jpg", "b.jpg", "c.jpg", "d.jpg", "e.jpg"]
+        self.assertEqual(worst_rows(cosines, ids, images),
+                         [(0.93, "40", "d.jpg"), (0.9455, "20", "b.jpg"), (0.98, "50", "e.jpg")])
+
+    def test_fewer_rows_than_count_returns_all(self):
+        from app_embed import worst_rows
+        self.assertEqual(worst_rows([0.9, 0.5], ["2", "1"], ["b.jpg", "a.jpg"], count=3),
+                         [(0.5, "1", "a.jpg"), (0.9, "2", "b.jpg")])
+
+    def test_ties_on_cosine_ordered_by_row_id(self):
+        from app_embed import worst_rows
+        result = worst_rows([0.9, 0.9, 0.9], ["1002", "1001", "1003"],
+                            ["x.jpg", "y.jpg", "z.jpg"], count=3)
+        self.assertEqual(result, [(0.9, "1001", "y.jpg"), (0.9, "1002", "x.jpg"), (0.9, "1003", "z.jpg")])
+
+    def test_input_order_does_not_change_result(self):
+        from app_embed import worst_rows
+        cosines = [0.97, 0.92, 0.99, 0.93]
+        ids = ["4", "1", "3", "2"]
+        images = ["d.jpg", "a.jpg", "c.jpg", "b.jpg"]
+        forward = worst_rows(cosines, ids, images, count=2)
+        backward = worst_rows(cosines[::-1], ids[::-1], images[::-1], count=2)
+        self.assertEqual(forward, backward)
+
+
 if __name__ == "__main__":
     unittest.main()
