@@ -1,10 +1,46 @@
 """Gallery synchronization tests; no embedder or model required."""
+import random
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
+import numpy as np
+
 from embed_append import gallery_filename, update_gallery
+
+CDN = "https://cdn.pokoin.com/"
+
+
+def face(index):
+    """The objects file name row `index` points at, unique per row."""
+    return f"{2 * index}_card.jpg"
+
+
+def app_rows(count):
+    """Catalog rows in the shape app_embed reads: a public id and a cdn image URL."""
+    return [{"id": str(2 * i), "image": CDN + face(i)} for i in range(count)]
+
+
+def stored_vectors(count):
+    """(count, 128) float16 rows of the unit vector e0, as a catalog embeddings file holds them."""
+    return np.tile(np.eye(128, dtype=np.float16)[0], (count, 1))
+
+
+def matching_fresh(indices):
+    """Fake embedder returning e0 per row: a fresh embedding that agrees with the stored vector."""
+    return np.tile(np.eye(128, dtype=np.float32)[0], (len(indices), 1))
+
+
+def perturbed_fresh(indices):
+    """Fake embedder returning e1 per row: cosine 0 against every stored vector."""
+    return np.tile(np.eye(128, dtype=np.float32)[1], (len(indices), 1))
+
+
+def already_unit(vectors):
+    """normalize() stand-in for vectors that are already unit length."""
+    return vectors
 
 
 class GalleryTests(unittest.TestCase):
@@ -117,6 +153,188 @@ class AppEmbedWorstRowsTests(unittest.TestCase):
         forward = worst_rows(cosines, ids, images, count=2)
         backward = worst_rows(cosines[::-1], ids[::-1], images[::-1], count=2)
         self.assertEqual(forward, backward)
+
+
+class CatalogStampTests(unittest.TestCase):
+    """When the catalog's own vectors were computed, read from its stamp sources and never from a file mtime."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+
+    def sidecar(self, text):
+        (self.root / "embedded-at.json").write_text(text)
+
+    def test_run_start_sidecar_wins(self):
+        from app_embed import catalog_stamp
+        self.sidecar('{"runStart": "2026-11-19T23:43:58Z"}')
+        stamp, source = catalog_stamp(self.root, {"generatedAt": "2026-01-01T00:00:00Z"})
+        self.assertEqual(source, "embedded-at.json")
+        self.assertEqual(stamp, datetime(2026, 11, 19, 23, 43, 58, tzinfo=timezone.utc).timestamp())
+
+    def test_generated_at_alone_with_an_offset(self):
+        from app_embed import catalog_stamp
+        stamp, source = catalog_stamp(self.root, {"generatedAt": "2026-11-19T12:00:00+02:00"})
+        self.assertEqual((source, stamp),
+                         ("index.generatedAt", datetime(2026, 11, 19, 10, 0, 0, tzinfo=timezone.utc).timestamp()))
+
+    def test_unusable_sidecar_falls_back_to_generated_at(self):
+        from app_embed import catalog_stamp
+        index = {"generatedAt": "2026-11-19T10:00:00Z"}
+        expected = (datetime(2026, 11, 19, 10, 0, 0, tzinfo=timezone.utc).timestamp(), "index.generatedAt")
+        for text in ("", "not json", "[]", "{}", '{"runStart": 1763581438}', '{"runStart": "yesterday"}'):
+            with self.subTest(sidecar=text):
+                self.sidecar(text)
+                self.assertEqual(catalog_stamp(self.root, index), expected)
+
+    def test_no_usable_source_gives_no_stamp(self):
+        from app_embed import catalog_stamp
+        self.assertEqual(catalog_stamp(self.root, {}), (None, "no stamp"))
+        self.sidecar('{"runStart": "yesterday"}')
+        self.assertEqual(catalog_stamp(self.root, {"generatedAt": "long ago"}), (None, "no stamp"))
+
+
+class ReplacedRowsLeaveTheSampleTests(unittest.TestCase):
+    """A picture newer than the catalog stamp leaves the parity sample and is re-embedded instead."""
+
+    STAMP = 1000000.0
+    OLD = 999000.0
+    NEW = 1000001.0
+
+    def setUp(self):
+        from app_embed import image_key
+        self.image_key = image_key
+        self.rows = app_rows(40)
+        self.vectors = stored_vectors(40)
+        self.mtimes = {face(i): self.OLD for i in range(40)}
+
+    def parity(self, embed_rows=matching_fresh):
+        from app_embed import parity_step
+        return parity_step(self.rows, self.vectors, set(), set(), self.image_key, self.mtimes.get, self.STAMP,
+                           embed_rows, already_unit)
+
+    def refresh(self):
+        from app_embed import refresh_indices
+        return refresh_indices(self.rows, self.vectors, set(), set(), self.image_key, self.mtimes.get, self.STAMP)
+
+    def test_replaced_picture_is_skipped_and_refreshed(self):
+        self.mtimes[face(7)] = self.NEW
+        code, lines, pick, skipped = self.parity()
+        self.assertEqual((code, skipped), (0, [7]))
+        self.assertEqual(self.refresh(), [7])
+        self.assertNotIn(7, pick)
+
+    def test_the_sample_draws_only_unchanged_rows(self):
+        self.mtimes[face(7)] = self.NEW
+        _, _, pick, _ = self.parity()
+        self.assertEqual(pick, random.Random(29).sample([i for i in range(40) if i != 7], 30))
+
+    def test_picture_as_old_as_the_stamp_is_still_compared(self):
+        self.mtimes[face(3)] = self.STAMP
+        code, _, pick, skipped = self.parity()
+        self.assertEqual((code, skipped), (0, []))
+        self.assertEqual(pick, random.Random(29).sample(list(range(40)), 30))
+
+    def test_healthy_run_names_no_skipped_row_and_states_the_rule(self):
+        code, lines, pick, skipped = self.parity()
+        out = [text for stream, text in lines if stream == "stdout"]
+        self.assertEqual((code, skipped, len(pick)), (0, [], 30))
+        self.assertIn("parity skipped 0 changed rows", out)
+        stamp_line = ("parity stamp none; a row is skipped only when its image file is newer than the stamp,"
+                      " an image replaced with its old modification time kept is still compared"
+                      " and may still fail")
+        self.assertEqual(out[-1], stamp_line)
+
+    def test_at_most_ten_skipped_row_ids_are_named(self):
+        from app_embed import parity_step
+        rows, vectors = app_rows(60), stored_vectors(60)
+        mtimes = {face(i): (self.NEW if i < 12 else self.OLD) for i in range(60)}
+        code, lines, pick, skipped = parity_step(rows, vectors, set(), set(), self.image_key, mtimes.get, self.STAMP,
+                                                 matching_fresh, already_unit)
+        out = [text for stream, text in lines if stream == "stdout"]
+        self.assertEqual((code, skipped, len(pick)), (0, list(range(12)), 30))
+        self.assertIn("parity skipped 12 changed rows: 0 2 4 6 8 10 12 14 16 18", out)
+
+
+class PerturbedEmbedderFailsTests(unittest.TestCase):
+    """Rows whose picture has not changed are still compared, so a drifted embedder cannot pass unnoticed."""
+
+    def test_fresh_vectors_that_do_not_match_still_return_code_two(self):
+        from app_embed import image_key, parity_step
+        rows, vectors = app_rows(40), stored_vectors(40)
+        mtimes = {face(i): 1000.0 for i in range(40)}
+        code, lines, pick, skipped = parity_step(rows, vectors, set(), set(), image_key, mtimes.get, 2000.0,
+                                                 perturbed_fresh, already_unit)
+        out = [text for stream, text in lines if stream == "stdout"]
+        self.assertEqual((code, skipped, len(pick)), (2, [], 30))
+        self.assertEqual(out[0], "parity n=30 min=0.000000")
+        self.assertIn("parity below 0.995: 30 of 30", out)
+        self.assertEqual(sum(1 for text in out if text.startswith("parity row id=")), 3)
+
+
+class CannotGoQuietTests(unittest.TestCase):
+    """Skipping stale rows may never leave the check comparing too little and passing silently."""
+
+    STAMP = 1000000.0
+    ROWS = 200
+
+    def catalog(self, comparable, changed):
+        """`comparable` rows hold a vector and a picture, `changed` of them newer than STAMP; the rest hold zeros."""
+        rows, vectors = app_rows(self.ROWS), stored_vectors(self.ROWS)
+        for i in range(comparable, self.ROWS):
+            vectors[i] = 0
+        mtimes = {face(i): self.STAMP + (1 if i < changed else -1) for i in range(comparable)}
+        return rows, vectors, mtimes
+
+    def assert_refused(self, comparable, changed, message):
+        from app_embed import image_key, parity_step
+        rows, vectors, mtimes = self.catalog(comparable, changed)
+        code, lines, pick, skipped = parity_step(rows, vectors, set(), set(), image_key, mtimes.get, self.STAMP,
+                                                 matching_fresh, already_unit)
+        self.assertEqual((code, lines), (3, [("stderr", message)]))
+        self.assertEqual((pick, len(skipped)), ([], changed))
+
+    def test_too_few_unchanged_rows_left_after_skipping(self):
+        # 15 skipped of 200 rows is under the 20 % limit, so only the 30-unchanged-rows floor can refuse here.
+        self.assert_refused(40, 15, "parity: not enough unchanged rows: 25 eligible, 15 skipped")
+
+    def test_too_many_rows_skipped_while_thirty_unchanged_remain(self):
+        # 45 skipped is over 20 % of 200 rows, and 55 unchanged rows remain, so only the fraction can refuse here.
+        self.assert_refused(100, 45, "parity: not enough unchanged rows: 55 eligible, 45 skipped")
+
+    def test_too_few_comparable_rows_keeps_todays_refusal(self):
+        from app_embed import image_key, parity_step
+        rows, vectors, mtimes = self.catalog(20, 0)
+        code, lines, pick, skipped = parity_step(rows, vectors, set(), set(), image_key, mtimes.get, self.STAMP,
+                                                 matching_fresh, already_unit)
+        self.assertEqual((code, lines), (2, [("stderr", "not enough parity rows")]))
+        self.assertEqual((pick, skipped), ([], []))
+
+
+class NothingChangedMeansNothingDifferentTests(unittest.TestCase):
+    """With no picture newer than the stamp the draw must be exactly the one today's rule made."""
+
+    def test_the_sample_matches_the_draw_of_the_list_before_the_stamp_rule(self):
+        from app_embed import image_key, parity_step
+        count = 210
+        rows, vectors = app_rows(count), stored_vectors(count)
+        for i in range(5, 60, 7):
+            vectors[i] = 0
+        noimage = {rows[i]["id"] for i in range(3, count, 11)}
+        audit = {face(i) for i in range(7, count, 13)}
+        missing = {face(i) for i in range(9, count, 17)}
+        mtimes = {face(i): 500.0 for i in range(count) if face(i) not in missing}
+        # the list drawn before the stamp rule
+        old_eligible = [i for i, row in enumerate(rows)
+                        if row["id"] not in noimage and np.any(vectors[i])
+                        and image_key(row.get("image")) not in audit and image_key(row.get("image"))
+                        and mtimes.get(image_key(row.get("image"))) is not None]
+        code, lines, pick, skipped = parity_step(rows, vectors, noimage, audit, image_key, mtimes.get, 1000.0,
+                                                 matching_fresh, already_unit)
+        self.assertGreaterEqual(len(old_eligible), 30)
+        self.assertEqual((code, skipped), (0, []))
+        self.assertEqual(pick, random.Random(29).sample(old_eligible, 30))
 
 
 if __name__ == "__main__":
