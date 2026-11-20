@@ -38,6 +38,17 @@ def perturbed_fresh(indices):
     return np.tile(np.eye(128, dtype=np.float32)[1], (len(indices), 1))
 
 
+def fresh_with_one_failure(failing):
+    """Fake embedder agreeing with the stored vector for all rows but `failing`, which comes back unrelated."""
+    def embed_rows(indices):
+        fresh = matching_fresh(indices)
+        for at, index in enumerate(indices):
+            if index == failing:
+                fresh[at] = np.eye(128, dtype=np.float32)[1]
+        return fresh
+    return embed_rows
+
+
 def already_unit(vectors):
     """normalize() stand-in for vectors that are already unit length."""
     return vectors
@@ -225,10 +236,53 @@ class ReplacedRowsLeaveTheSampleTests(unittest.TestCase):
         self.assertEqual(self.refresh(), [7])
         self.assertNotIn(7, pick)
 
-    def test_the_sample_draws_only_unchanged_rows(self):
-        self.mtimes[face(7)] = self.NEW
-        _, _, pick, _ = self.parity()
-        self.assertEqual(pick, random.Random(29).sample([i for i in range(40) if i != 7], 30))
+    def test_the_sample_keeps_todays_unchanged_rows_and_tops_up_from_the_rest(self):
+        changed = [7, 13, 21]
+        for i in changed:
+            self.mtimes[face(i)] = self.NEW
+        today = random.Random(29).sample(list(range(40)), 30)
+        kept = [i for i in today if i not in changed]
+        code, _, pick, skipped = self.parity()
+        self.assertEqual((code, skipped), (0, changed))
+        self.assertEqual(len(pick), 30)
+        self.assertEqual(set(pick) & set(changed), set())
+        self.assertEqual([i for i in pick if i in set(kept)], kept)
+        top_up = [i for i in pick if i not in set(today)]
+        self.assertEqual(len(top_up), 30 - len(kept))
+        self.assertTrue(set(top_up) <= set(range(40)) - set(today) - set(changed))
+
+    def test_an_unchanged_failure_of_todays_draw_is_still_compared_and_fails(self):
+        today = random.Random(29).sample(list(range(40)), 30)
+        replaced, failing = today[0], today[1]
+        self.mtimes[face(replaced)] = self.NEW
+        code, lines, pick, skipped = self.parity(embed_rows=fresh_with_one_failure(failing))
+        out = [text for stream, text in lines if stream == "stdout"]
+        self.assertEqual((code, skipped, len(pick)), (2, [replaced], 30))
+        self.assertIn(failing, pick)
+        self.assertNotIn(replaced, pick)
+        self.assertEqual(out[1], "parity below 0.995: 1 of 30")
+        self.assertEqual(out[2], f"parity row id={self.rows[failing]['id']} cos=0.000000 image={face(failing)}")
+
+    def test_no_stamp_or_a_stamp_after_every_picture_keeps_todays_draw(self):
+        from app_embed import parity_step
+        expected = random.Random(29).sample(list(range(40)), 30)
+        for stamp in (None, self.NEW):
+            with self.subTest(stamp=stamp):
+                code, lines, pick, skipped = parity_step(self.rows, self.vectors, set(), set(), self.image_key,
+                                                         self.mtimes.get, stamp, matching_fresh, already_unit)
+                out = [text for stream, text in lines if stream == "stdout"]
+                self.assertEqual((code, skipped, pick), (0, [], expected))
+                self.assertIn("parity skipped 0 changed rows", out)
+
+    def test_a_stamp_that_skips_rows_still_samples_thirty_and_is_repeatable(self):
+        for i in range(6):
+            self.mtimes[face(i)] = self.NEW
+        code, _, pick, skipped = self.parity()
+        self.assertEqual((code, skipped), (0, list(range(6))))
+        self.assertEqual(len(pick), 30)
+        self.assertEqual(len(set(pick)), 30)
+        self.assertEqual(set(pick) & set(range(6)), set())
+        self.assertEqual(self.parity()[2], pick)
 
     def test_picture_as_old_as_the_stamp_is_still_compared(self):
         self.mtimes[face(3)] = self.STAMP
