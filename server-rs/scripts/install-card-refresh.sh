@@ -1,5 +1,7 @@
 #!/bin/bash
+# Usage: bash server-rs/scripts/install-card-refresh.sh   (bash, not sh: it uses [[ ]] and pipefail)
 # Build an immutable tools revision and atomically select it. Not run by the daily job.
+[ -n "${BASH_VERSION:-}" ] || { echo "install-card-refresh.sh needs bash: run 'bash $0'" >&2; exit 1; }
 set -euo pipefail
 repo=$(cd "$(dirname "$0")/.." && pwd)
 cd "$repo"

@@ -8,6 +8,7 @@ state=${CARD_STATE:-/home/nez/data/card-images}
 dry=${DRY_RUN:-0}
 date_id=$(date -u +%Y%m%d)
 stamp=$(date -u +%Y-%m-%dT%H%M%SZ)
+run_start=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 mkdir -p "$state"
 exec 9> "$state/lock"
 flock -n 9 || { echo 'card refresh already running' >&2; exit 1; }
@@ -119,6 +120,10 @@ if [[ $dry == 1 ]]; then catalog_out=$(unique_path "$state/dry/$date_id-auto-car
 else catalog_out=$(unique_path "/home/nez/data/cardrails-catalogs/$date_id-auto-cards"); fi
 heavy "$bin/card-images" catalog-mark --catalogs "$catalogs" --audit "$state/audit.jsonl" --out "$catalog_out" \
   --only pokemon_western,pokemon_japanese,pokemon_chinese --embeddings "$run/app-embeddings.jsonl"
+# When this revision's vectors were computed, from this run's start. Written through a temp file: catalog-mark
+# may hard-link a file from the base revision, and writing in place would change the published revision too.
+printf '{"runStart":"%s"}\n' "$run_start" > "$catalog_out/.embedded-at.json.tmp"
+mv -f "$catalog_out/.embedded-at.json.tmp" "$catalog_out/embedded-at.json"
 staged='' published=false
 # Ignore provenance-only changes; retain a revision only if rows/vectors/no-image state changed.
 if jq -e -s '.[0].catalogs != .[1].catalogs' "$catalogs/index.json" "$catalog_out/index.json" >/dev/null; then
