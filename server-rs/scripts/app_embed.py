@@ -108,7 +108,16 @@ def parity_step(rows, vectors, noimage, audit, image_key, mtime_of, stamp, embed
     if len(eligible) < verify or len(skipped) > max_skipped_fraction * len(rows):
         refusal = f'parity: not enough unchanged rows: {len(eligible)} eligible, {len(skipped)} skipped'
         return 3, [('stderr', refusal)], [], skipped
-    pick = random.Random(seed).sample(eligible, verify)
+    # Draw exactly as today, then take only the changed rows out and top the count back up with unchanged ones.
+    # Redrawing all 30 from the shortened population would drop unchanged rows that failed before the stamp rule.
+    rng = random.Random(seed)
+    first = rng.sample(comparable_all, verify)
+    pick = [i for i in first if i not in changed]
+    need = verify - len(pick)
+    if need:
+        chosen = set(first)
+        rest = [i for i in eligible if i not in chosen]
+        pick = pick + rng.sample(rest, need)
     fresh = embed_rows(pick)
     cosine = np.sum(fresh * normalize(vectors[pick].astype(np.float32)), axis=1)
     minimum = float(cosine.min())
